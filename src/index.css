@@ -1,0 +1,28 @@
+@import 'swiper/css';
+@import 'swiper/css/navigation';
+@import 'swiper/css/pagination';
+@import 'swiper/css/effect-fade';
+@import 'swiper/css/keyboard';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes gradient-move {
+  0% { background-position: 0% 50% }
+  50% { background-position: 100% 50% }
+  100% { background-position: 0% 50% }
+}
+.animate-gradient{
+  background-size: 200% 200%;
+  animation: gradient-move 6s ease infinite;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 999px; }
+::-webkit-scrollbar-track { background: rgba(255,255,255,.04); }
+/* src/index.css */
+.reader-mode .site-header,
+.reader-mode .Navbar,
+.reader-mode [data-reader-hide] { display: none !important; }
