@@ -93,9 +93,12 @@ export default function Search() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Genre options + picked (pakai value lowercase untuk konsistensi)
-  const [genres, setGenres] = useState([]); // [{label, value}]
-  const [pickedGenres, setPickedGenres] = useState(urlGenres.map(x => x.toLowerCase().trim()));
+  // Genre options + picked (pakai lowercase agar seragam)
+const [genres, setGenres] = useState([]); // {label, value}
+const [pickedGenres, setPickedGenres] = useState(
+  urlGenres.map(x => (GENRE_ALIAS[x.toLowerCase().trim()] ?? x.toLowerCase().trim()))
+);
+
 
   /* ----- Load genres sekali ----- */
   useEffect(() => {
@@ -156,12 +159,15 @@ export default function Search() {
         else r = await fetchLatest(1);
         r = Array.isArray(r) ? r : [];
 
-        if (g.length) {
-          r = r.filter(it => {
-            const have = new Set(extractGenres(it)); // lowercase normalized
-            return g.some(w => have.has(w));
-          });
-        }
+if (g.length) {
+  r = r.filter(it => {
+    const have = new Set(
+      extractGenres(it).map(x => GENRE_ALIAS[x] ?? x)
+    ); // normalisasi genre di dataset
+    return g.some(w => have.has(w));
+  });
+}
+
 
         // Sort
         if (sort === 'az') r.sort((a,b) => (a.title||'').localeCompare(b.title||''));
@@ -213,40 +219,50 @@ export default function Search() {
     </div>
   );
 
-  const GenreFilter = () => (
-    <Section id="genre" title="Genre">
-      <div className="flex flex-wrap gap-2">
-        {genres.map(g => {
-          const active = pickedGenres.includes(g.value);
-          return (
-            <button
-              key={g.value}
-              onClick={() =>
-                setPickedGenres(prev =>
-                  active ? prev.filter(x => x !== g.value) : [...prev, g.value]
-                )
-              }
-              className={`px-3 py-1 rounded-xl text-sm transition ${
-                active ? 'bg-violet-500 text-white' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
-              }`}
-            >
-              {g.label}
-            </button>
-          );
-        })}
-      </div>
-      {!!pickedGenres.length && (
-        <div className="mt-3">
+const GenreFilter = () => (
+  <Section id="genre" title="Genre">
+    <div className="flex flex-wrap gap-2">
+      {genres.map(g => {
+        const val = g.value.toLowerCase();
+        const active = pickedGenres.includes(val);
+        return (
           <button
-            onClick={() => setPickedGenres([])}
-            className="px-3 py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm"
+            key={val}
+            onClick={() => {
+              setPickedGenres(prev =>
+                active
+                  ? prev.filter(x => x !== val)
+                  : [...prev, val]
+              );
+            }}
+            className={`px-3 py-1 rounded-xl text-sm transition ${
+              active
+                ? 'bg-violet-500 text-white ring-1 ring-violet-400'
+                : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
+            }`}
           >
-            Hapus semua
+            {g.label}
           </button>
-        </div>
-      )}
-    </Section>
-  );
+        );
+      })}
+    </div>
+
+    {!!pickedGenres.length && (
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => setPickedGenres([])}
+          className="px-3 py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm"
+        >
+          Hapus semua
+        </button>
+        <span className="text-xs text-zinc-400">
+          {pickedGenres.length} genre dipilih
+        </span>
+      </div>
+    )}
+  </Section>
+);
+
 
   /* ================= Render ================= */
   return (

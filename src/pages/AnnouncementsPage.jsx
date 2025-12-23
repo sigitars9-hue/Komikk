@@ -1,29 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { fetchAnnouncements } from "../lib/api";
+import { ANNOUNCEMENTS } from "../data/announcements";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 const PER_PAGE = 10; // jumlah item per halaman
 
 export default function AnnouncementsPage() {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+ const [items] = useState(ANNOUNCEMENTS);
+ const [loading] = useState(false);
 
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const currentPage = Math.max(1, Number(params.get("page") || 1));
-
-  // ambil data pengumuman
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    fetchAnnouncements()
-      .then((r) => alive && setItems(Array.isArray(r) ? r : []))
-      .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(items.length / PER_PAGE)),

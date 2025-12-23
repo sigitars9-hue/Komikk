@@ -26,3 +26,45 @@
 .reader-mode .site-header,
 .reader-mode .Navbar,
 .reader-mode [data-reader-hide] { display: none !important; }
+
+:root{
+  --panel: rgba(24,24,27,.6);
+  --ring: rgba(255,255,255,.08);
+}
+.bg-panel{ background: var(--panel); }
+.ring-soft{ box-shadow: inset 0 0 0 1px var(--ring); }
+
+@layer utilities {
+  .bg-app { @apply bg-app-gradient; }        /* latar halaman */
+  .bg-header { @apply bg-header-gradient; }  /* header */
+  .glass {
+    @apply ring-1 ring-white/10 bg-panel-gradient backdrop-blur-sm;
+  }
+  .btn-brand {
+    @apply bg-brand text-white hover:bg-brand/90 active:bg-brand/80;
+  }
+  .chip {
+    @apply px-3 py-1.5 rounded-lg text-sm ring-1 transition;
+  }
+  .chip-on  { @apply chip bg-brand text-white ring-brand/30; }
+  .chip-off { @apply chip bg-zinc-800/80 hover:bg-zinc-700/90 ring-white/10 text-zinc-200; }
+}
+@media (max-width: 640px) {
+  /* Geser panah sedikit dari tepi */
+  .swiper-button-prev { left: 18px !important; }
+  .swiper-button-next { right: 18px !important; }
+  .swiper-button-prev, .swiper-button-next {
+    width: 28px; height: 28px; transform: translateY(-50%);
+  }
+
+  /* Naikkan bullets sedikit & rapikan jarak */
+  .swiper-pagination-bullets { bottom: 16px !important; }
+  .swiper-pagination-bullet {
+    width: 6px; height: 6px; margin: 0 4px !important;
+    background: rgba(255,255,255,.45); opacity: 1;
+  }
+  .swiper-pagination-bullet-active {
+    background: rgb(56 189 248);
+    box-shadow: 0 0 6px rgba(56,189,248,.6);
+  }
+}

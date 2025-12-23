@@ -23,8 +23,8 @@ export default function Card({ item, hideTitle = false }) {
 
       {/* judul hanya jika tidak disembunyikan */}
       {!hideTitle && (
-        <div className="mt-1.5">
-          <div className="line-clamp-2 text-sm font-semibold leading-snug">{item.title}</div>
+        <div className="mt-1.5 text-center">
+          <div className="line-clamp-2 text-sm font-medium leading-snug">{item.title}</div>
         </div>
       )}
     </Link>

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../providers/AuthProvider';
 import { supabase } from '../lib/supabaseClient';
+import Logo from "./Logo";
 import {
   Search as SearchIcon,
   User2,
@@ -205,12 +206,25 @@ export default function HomeTopBar() {
     user?.email?.split('@')[0] ||
    '';
   return (
-    <header className="relative z-10 bg-transparent">
-      <div className="max-w-7xl mx-auto px-0">
-        <div className="h-14 flex items-center gap-4 sm:gap-6 w-full">
-          <Link to="/" replace className="font-extrabold text-xl text-white">
-            GV<span className="text-brand">Comics</span>
-          </Link>
+<header className="relative z-10 bg-transparent">
+  <div className="max-w-7xl mx-auto px-0">
+    <div className="h-14 flex items-center gap-4 sm:gap-6 w-full">
+      <Link to="/" replace className="flex items-center gap-2">
+        <img
+  src="https://i.ibb.co.com/HfHfZv4P/Logo-Text-gv-biru.png"
+  alt="Gachaverse.id"
+  className="
+    h-12              /* ukuran default (mobile) */
+    sm:h-12           /* sedikit lebih besar di layar ≥640px */
+    md:h-14           /* ukuran sedang di desktop */
+    object-contain
+
+  "
+  loading="eager"
+  decoding="async"
+/>
+
+      </Link>
 
           <nav className="hidden md:flex items-center gap-6">
             <NavLink to="/" end className={linkClass}>Home</NavLink>

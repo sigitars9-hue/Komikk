@@ -1,14 +1,14 @@
-// src/components/CardPopular.jsx
 import { Link } from 'react-router-dom';
 
 const TYPE_FLAG = {
-  Manhwa: '🇰🇷', // Korea
-  Manga:  '🇯🇵', // Jepang
-  Manhua: '🇨🇳', // China
+  manhwa: '🇰🇷', // Korea Selatan
+  manga:  '🇯🇵', // Jepang
+  manhua: '🇨🇳', // China
 };
 
 export default function CardPopular({ item }) {
-  const flag = TYPE_FLAG[item?.type] || null;
+  const typeKey = (item?.type || '').toLowerCase();
+  const flag = TYPE_FLAG[typeKey] || null;
 
   return (
     <Link to={`/series/${item.slug}`} className="group block w-full" title={item.title}>
@@ -45,8 +45,8 @@ export default function CardPopular({ item }) {
       </div>
 
       {/* Judul (wajib tampil di Populer) */}
-      <div className="mt-2">
-        <div className="line-clamp-2 text-sm font-semibold leading-snug">{item.title}</div>
+      <div className="mt-2 text-center">
+        <div className="line-clamp-2 text-sm font-medium  leading-snug">{item.title}</div>
       </div>
     </Link>
   );

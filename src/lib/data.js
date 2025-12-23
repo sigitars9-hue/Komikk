@@ -1,55 +1,71 @@
 // src/lib/data.js
 import { supabase } from './supabaseClient';
 
-// Kalau kamu punya backend (Express/Next API) set VITE_API_BASE di .env
 const API_BASE = import.meta.env.VITE_API_BASE || null;
 
-/** Ambil detail series (slug, title, cover, dsb) */
+/** Ambil detail series (sesuai API /manga/:slug) */
 export async function fetchSeries(slug) {
   if (!slug) throw new Error('slug kosong');
 
   if (API_BASE) {
-    const r = await fetch(`${API_BASE}/series/${encodeURIComponent(slug)}`);
+    const r = await fetch(`${API_BASE}/manga/${encodeURIComponent(slug)}`);
     if (!r.ok) throw new Error('fetchSeries gagal (REST)');
-    return await r.json();
+    return await r.json();        // bentuknya { info, chapters }
   }
 
-  // === Supabase fallback ===
+  // === Supabase fallback (opsional) ===
   const { data, error } = await supabase
     .from('series')
     .select('slug,title,cover,description,genres')
     .eq('slug', slug)
     .maybeSingle();
-
   if (error) throw error;
   if (!data) throw new Error('Series tidak ditemukan');
   return data;
 }
 
 /**
- * Ambil daftar URL gambar untuk chapter.
- * Kembalikan array URL (string) dan optional meta { title }.
+ * Ambil array URL gambar untuk chapter.
+ * Karena API kamu butuh chapterId, kita:
+ * 1) ambil data series dulu → cari chapter dengan number = chNo
+ * 2) pakai id-nya untuk hit /manga/chapter/:id
  */
 export async function fetchChapterImages(slug, chNo) {
   if (!slug) throw new Error('slug kosong');
   const chapterNumber = Number(chNo);
 
   if (API_BASE) {
-    const r = await fetch(
-      `${API_BASE}/chapters/${encodeURIComponent(slug)}/${chapterNumber}`
+    // 1) dapatkan daftar chapter untuk dapat id
+    const d = await fetchSeries(slug); // { info, chapters }
+    const chapters = d?.chapters || [];
+    const target = chapters.find(c =>
+      Number(c.number ?? c.chapter ?? c.no) === chapterNumber
     );
+    if (!target?.id) return [];
+
+    // 2) ambil halaman gambarnya
+    const r = await fetch(`${API_BASE}/manga/chapter/${encodeURIComponent(target.id)}`);
     if (!r.ok) throw new Error('fetchChapterImages gagal (REST)');
+
     const payload = await r.json();
-    // Normalisasi: pastikan format { images: string[], meta?: { title?: string } }
-    if (Array.isArray(payload)) return payload;
-    if (Array.isArray(payload?.images)) return payload.images;
-    return [];
+    const raw = Array.isArray(payload)
+      ? payload
+      : (payload?.pages || payload?.images || payload?.content || []);
+
+    const images = raw
+      .map(x => x?.url || x?.image || x?.src || x)
+      .filter(Boolean)
+      .map(String);
+
+    // sisipkan meta (optional)
+    Object.defineProperty(images, 'meta', {
+      value: { title: target.title || null, number: target.number || chapterNumber },
+      enumerable: false,
+    });
+    return images;
   }
 
-  // === Supabase fallback ===
-  // Contoh skema:
-  // table "chapters": { id, series_slug, number, title }
-  // table "chapter_images": { chapter_id, page_index, url }
+  // === Supabase fallback (opsional) ===
   const { data: chapter, error: chErr } = await supabase
     .from('chapters')
     .select('id, number, title')
@@ -64,11 +80,9 @@ export async function fetchChapterImages(slug, chNo) {
     .select('url')
     .eq('chapter_id', chapter.id)
     .order('page_index', { ascending: true });
-
   if (imErr) throw imErr;
 
-  const images = (imgs || []).map((x) => x.url);
-  // sisipkan meta di property non-enumerable agar aman dipakai opsional
+  const images = (imgs || []).map(x => x.url);
   Object.defineProperty(images, 'meta', {
     value: { title: chapter.title || null, number: chapter.number },
     enumerable: false,
