@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../providers/AuthProvider';
 import { supabase } from '../lib/supabaseClient';
-import Logo from "./Logo";
 import {
   Search as SearchIcon,
   User2,
@@ -25,10 +24,11 @@ function GoogleLogo({ className = 'w-5 h-5' }) {
   );
 }
 
-/* -------------- Modal via Portal (centered anywhere) -------------- */
+/* -------------- Modal via Portal -------------- */
 function ModalPortal({ children }) {
   return createPortal(children, document.body);
 }
+
 function ModalShell({ open, onClose, children }) {
   if (!open) return null;
   return (
@@ -126,12 +126,13 @@ function ProfileModal({ open, onClose, user, onHistory, onLogout }) {
   );
 }
 
-/* Modal pencarian khusus mobile */
+/* Modal input pencarian mobile */
 function SearchMobileModal({ open, onClose, value, onChange, onSubmit }) {
   const inputRef = useRef(null);
   useEffect(() => {
-    if (open) setTimeout(() => inputRef.current?.focus(), 10);
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
   }, [open]);
+
   return (
     <ModalShell open={open} onClose={onClose}>
       <div className="flex items-center justify-between mb-3">
@@ -145,27 +146,36 @@ function SearchMobileModal({ open, onClose, value, onChange, onSubmit }) {
           ref={inputRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && onSubmit()}
-          placeholder="Ketik judul komik…"
-          className="w-full rounded-lg bg-zinc-800/70 border border-white/10 pl-4 pr-12 py-3
-                     outline-none focus:ring-2 ring-brand/40"
+          onKeyDown={(e) => e.key === 'Enter' && onSubmit && onSubmit()}
+          placeholder="Ketik min. 3 huruf..."
+          className="w-full rounded-lg bg-zinc-800/70 border border-white/10 pl-4 pr-10 py-3
+                     outline-none focus:ring-2 ring-brand/40 text-sm"
         />
-        <button
-          onClick={onSubmit}
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 w-10 h-10 rounded-md
-                     bg-zinc-700 hover:bg-zinc-600 grid place-items-center"
-          aria-label="Cari"
-        >
-          <SearchIcon className="w-5 h-5 text-zinc-200" />
-        </button>
+        {value ? (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-zinc-400 hover:text-white"
+            aria-label="Hapus teks"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onSubmit}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white"
+          >
+            <SearchIcon className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </ModalShell>
   );
 }
 
 /* ---------------- Top Bar ---------------- */
-export default function HomeTopBar() {
-  const [q, setQ] = useState('');
+export default function HomeTopBar({ searchQuery, onSearch }) {
   const [showLogin, setShowLogin] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showSearchMobile, setShowSearchMobile] = useState(false);
@@ -175,17 +185,54 @@ export default function HomeTopBar() {
   const [sp] = useSearchParams();
   const { user, loading, signInGoogle } = useAuth();
 
-  useEffect(() => {
-    if (loc.pathname === '/search') setQ(sp.get('q') || '');
-    else setQ('');
-  }, [loc.pathname, sp]);
+  // Internal state jika props searchQuery tidak dioper (misalnya di Explore / Search)
+  const isControlled = typeof onSearch === 'function';
+  const [localQuery, setLocalQuery] = useState(() => {
+    if (searchQuery !== undefined) return searchQuery;
+    if (loc.pathname === '/search') return sp.get('q') || '';
+    return '';
+  });
 
-  const goSearch = () => {
-    const s = q.trim();
-    if (!s) return nav('/search');
-    const next = new URLSearchParams();
-    next.set('q', s);
-    nav({ pathname: '/search', search: `?${next.toString()}` });
+  // Sinkronkan local state jika props searchQuery berubah atau URL berubah
+  useEffect(() => {
+    if (searchQuery !== undefined) {
+      setLocalQuery(searchQuery);
+    } else if (loc.pathname === '/search') {
+      setLocalQuery(sp.get('q') || '');
+    }
+  }, [searchQuery, loc.pathname, sp]);
+
+  const currentVal = isControlled ? searchQuery : localQuery;
+
+  const handleInputChange = (val) => {
+    if (isControlled) {
+      onSearch(val);
+    } else {
+      setLocalQuery(val);
+    }
+  };
+
+  const handleClear = () => {
+    if (isControlled) {
+      onSearch('');
+    } else {
+      setLocalQuery('');
+    }
+  };
+
+  const handleSearchSubmit = () => {
+    const trimmed = (currentVal || '').trim();
+    if (isControlled) {
+      // Jika di Home dan dikontrol, biarkan Home yang memproses live
+      setShowSearchMobile(false);
+      return;
+    }
+    // Jika di halaman Explore / Search / lainnya, navigasi ke /search?q=...
+    if (trimmed) {
+      nav(`/search?q=${encodeURIComponent(trimmed)}`);
+    } else {
+      nav('/search');
+    }
     setShowSearchMobile(false);
   };
 
@@ -193,39 +240,36 @@ export default function HomeTopBar() {
     isActive ? 'text-white' : 'text-zinc-300 hover:text-white transition-colors';
 
   const id0 = user?.identities?.[0]?.identity_data || {};
- const avatar =
-   user?.user_metadata?.avatar_url ||
-   user?.user_metadata?.picture ||
-   id0?.avatar_url ||
-   id0?.picture |+   null;
- const displayName =
-   user?.user_metadata?.full_name ||
-   user?.user_metadata?.name ||
-   id0?.full_name ||
-   id0?.name ||
+  const avatar =
+    user?.user_metadata?.avatar_url ||
+    user?.user_metadata?.picture ||
+    id0?.avatar_url ||
+    id0?.picture ||
+    null;
+
+  const displayName =
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    id0?.full_name ||
+    id0?.name ||
     user?.email?.split('@')[0] ||
-   '';
+    '';
+
   return (
-<header className="relative z-10 bg-transparent">
-  <div className="max-w-7xl mx-auto px-0">
-    <div className="h-14 flex items-center gap-4 sm:gap-6 w-full">
-      <Link to="/" replace className="flex items-center gap-2">
-        <img
-  src="https://i.ibb.co.com/HfHfZv4P/Logo-Text-gv-biru.png"
-  alt="Gachaverse.id"
-  className="
-    h-12              /* ukuran default (mobile) */
-    sm:h-12           /* sedikit lebih besar di layar ≥640px */
-    md:h-14           /* ukuran sedang di desktop */
-    object-contain
+    <header className="relative z-10 bg-transparent">
+      <div className="max-w-7xl mx-auto px-0">
+        <div className="h-14 flex items-center gap-4 sm:gap-6 w-full">
+          <Link to="/" replace className="flex items-center gap-2">
+            <img
+              src="https://i.ibb.co.com/HfHfZv4P/Logo-Text-gv-biru.png"
+              alt="Gachaverse.id"
+              className="h-12 sm:h-12 md:h-14 object-contain"
+              loading="eager"
+              decoding="async"
+            />
+          </Link>
 
-  "
-  loading="eager"
-  decoding="async"
-/>
-
-      </Link>
-
+          {/* Navigasi Utama */}
           <nav className="hidden md:flex items-center gap-6">
             <NavLink to="/" end className={linkClass}>Home</NavLink>
             <NavLink to="/explore" className={linkClass}>Explore</NavLink>
@@ -233,39 +277,52 @@ export default function HomeTopBar() {
             <NavLink to="/search" className={linkClass}>Search</NavLink>
           </nav>
 
-          {/* Search + Auth */}
           <div className="flex-1" />
+
+          {/* Search Input Box + Auth */}
           <div className="ml-auto flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-end">
-            {/* Desktop search (hidden di mobile) */}
+            {/* Desktop search */}
             <div className="relative w-full max-w-lg sm:max-w-xs hidden sm:block">
               <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && goSearch()}
-                placeholder="Cari Komik"
+                value={currentVal || ''}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
+                placeholder="Cari Komik..."
                 aria-label="Cari Komik"
-                className="w-full rounded-lg bg-zinc-800/70 border border-white/10 pl-4 pr-12 py-2
-                           outline-none focus:ring-2 ring-brand/40"
+                className="w-full rounded-lg bg-zinc-800/70 border border-white/10 pl-4 pr-10 py-2
+                           outline-none focus:ring-2 ring-brand/40 text-sm placeholder-zinc-500"
               />
-              <button
-                onClick={goSearch}
-                aria-label="Cari"
-                title="Cari"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-md
-                           bg-zinc-700 hover:bg-zinc-600 grid place-items-center"
-              >
-                <SearchIcon className="w-4 h-4 text-zinc-200" />
-              </button>
+              {currentVal ? (
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-0.5"
+                  title="Hapus pencarian"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSearchSubmit}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white"
+                >
+                  <SearchIcon className="w-4 h-4" />
+                </button>
+              )}
             </div>
 
-            {/* Mobile search button */}
+            {/* Mobile search trigger button */}
             <button
               onClick={() => setShowSearchMobile(true)}
-              className="sm:hidden w-9 h-9 rounded-md bg-zinc-800 grid place-items-center hover:bg-zinc-700"
+              className="sm:hidden w-9 h-9 rounded-md bg-zinc-800 grid place-items-center hover:bg-zinc-700 relative"
               aria-label="Buka pencarian"
               title="Cari"
             >
               <SearchIcon className="w-5 h-5 text-zinc-200" />
+              {(currentVal || '').trim().length >= 3 && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-brand ring-2 ring-zinc-900" />
+              )}
             </button>
 
             {/* Auth */}
@@ -300,7 +357,7 @@ export default function HomeTopBar() {
         </div>
       </div>
 
-      {/* Modals via portal (selalu center & responsif) */}
+      {/* Modals via portal */}
       <LoginModal
         open={showLogin}
         onClose={() => setShowLogin(false)}
@@ -317,7 +374,7 @@ export default function HomeTopBar() {
             await supabase.auth.signOut();
           } finally {
             setShowProfile(false);
-            nav(0); // refresh agar state auth bersih; bisa diganti update context manual
+            nav(0);
           }
         }}
       />
@@ -325,9 +382,9 @@ export default function HomeTopBar() {
       <SearchMobileModal
         open={showSearchMobile}
         onClose={() => setShowSearchMobile(false)}
-        value={q}
-        onChange={setQ}
-        onSubmit={goSearch}
+        value={currentVal || ''}
+        onChange={handleInputChange}
+        onSubmit={handleSearchSubmit}
       />
     </header>
   );

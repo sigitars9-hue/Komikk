@@ -5,6 +5,7 @@ import Card from "../components/Card";
 import HomeTopBar from "../components/HomeTopBar";
 import { useAuth } from "../providers/AuthProvider";
 import { getLibraryAll, removeFromLibrary, clearSection } from "../lib/library";
+import { fetchSearch } from "../lib/api";
 import { supabase } from "../lib/supabaseClient";
 import clsx from "clsx";
 import { Search, ArrowUpDown } from "lucide-react";
@@ -27,8 +28,6 @@ function safeText(v) {
 }
 
 function getUpdatedAtValue(it) {
-  // library items bisa beda bentuk, amanin.
-  // updatedAt bisa string ISO atau plain date.
   const raw =
     it?.updatedAt ||
     it?.lastReadAt ||
@@ -40,7 +39,7 @@ function getUpdatedAtValue(it) {
   return Number.isFinite(t) ? t : 0;
 }
 
-/* ===== Skeletons (Home-like) ===== */
+/* ===== Skeletons ===== */
 function GridCardSkeleton({ count = 10 }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 animate-pulse">
@@ -119,11 +118,46 @@ export default function Library() {
   const [data, setData] = useState({ favorites: [], bookmarks: [], history: [] });
   const [busy, setBusy] = useState(false);
 
-  // ✅ tambahan fitur
+  // Search filter lokal untuk koleksi library
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState("newest"); // newest | oldest | az
+  const [sort, setSort] = useState("newest");
 
-  // load awal
+  // State Live Search di TopBar (min 3 huruf)
+  const [topQuery, setTopQuery] = useState("");
+  const [topSearchResults, setTopSearchResults] = useState([]);
+  const [topSearching, setTopSearching] = useState(false);
+
+  /* Debounce live search TopBar 350ms */
+  useEffect(() => {
+    const term = topQuery.trim();
+    if (term.length < 3) {
+      setTopSearchResults([]);
+      setTopSearching(false);
+      return;
+    }
+
+    let alive = true;
+    setTopSearching(true);
+    const timer = setTimeout(() => {
+      fetchSearch(term)
+        .then((res) => {
+          if (alive) setTopSearchResults(Array.isArray(res) ? res : []);
+        })
+        .catch(() => {
+          if (alive) setTopSearchResults([]);
+        })
+        .finally(() => {
+          if (alive) setTopSearching(false);
+        });
+    }, 350);
+
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [topQuery]);
+
+  // Load awal
   useEffect(() => {
     let alive = true;
     if (!user) return;
@@ -143,7 +177,7 @@ export default function Library() {
     };
   }, [user]);
 
-  // realtime
+  // Realtime Supabase
   useEffect(() => {
     if (!user || !supabase) return;
 
@@ -184,7 +218,6 @@ export default function Library() {
     }
   };
 
-  // badge counts
   const counts = useMemo(() => {
     return {
       bookmarks: (data.bookmarks || []).length,
@@ -195,18 +228,15 @@ export default function Library() {
 
   const rawList = data[tab] || [];
 
-  // search + sort
+  // Filter search lokal + sort
   const list = useMemo(() => {
     const q = safeText(query);
-
     let arr = [...rawList];
 
-    // filter search (title)
     if (q) {
       arr = arr.filter((it) => safeText(it?.title).includes(q));
     }
 
-    // sort
     arr.sort((a, b) => {
       if (sort === "az") {
         return safeText(a?.title).localeCompare(safeText(b?.title));
@@ -215,7 +245,6 @@ export default function Library() {
       const tb = getUpdatedAtValue(b);
 
       if (sort === "oldest") return ta - tb;
-      // newest
       return tb - ta;
     });
 
@@ -227,15 +256,14 @@ export default function Library() {
     [tab]
   );
 
-  /* ===== RENDER ===== */
+  const isTopSearchActive = topQuery.trim().length >= 3;
+
+  /* ===== Loading Auth ===== */
   if (loading) {
     return (
       <div className="space-y-6">
-        {/* Topbar normal */}
-        <div className="sticky top-0 z-30 backdrop-blur bg-zinc-950/70 ring-b ring-white/10">
-          <div className="max-w-7xl mx-auto px-4 py-3">
-            <HomeTopBar />
-          </div>
+        <div className="max-w-7xl mx-auto px-4 py-3">
+          <HomeTopBar searchQuery={topQuery} onSearch={setTopQuery} />
         </div>
 
         <div className="max-w-7xl mx-auto px-4">
@@ -248,17 +276,14 @@ export default function Library() {
     );
   }
 
-  if (!user) {
+  /* ===== Belum Login (Tetap bisa pakai Live Search jika mencari di TopBar) ===== */
+  if (!user && !isTopSearchActive) {
     return (
       <div className="space-y-6">
-        {/* Topbar normal (NO fullbleed hacks) */}
-        <div className="sticky top-0 z-30 backdrop-blur bg-zinc-950/70 ring-b ring-white/10">
-          <div className="max-w-7xl mx-auto px-4 py-3">
-            <HomeTopBar />
-          </div>
+        <div className="max-w-7xl mx-auto px-4 py-3">
+          <HomeTopBar searchQuery={topQuery} onSearch={setTopQuery} />
         </div>
 
-        {/* Center card (rapi, tidak berantakan) */}
         <div className="max-w-3xl mx-auto px-4">
           <div className="rounded-3xl bg-zinc-900/40 ring-1 ring-white/10 overflow-hidden">
             <div className="p-8 sm:p-12 flex flex-col items-center text-center">
@@ -299,225 +324,253 @@ export default function Library() {
 
   return (
     <div className="space-y-6">
-      {/* Topbar normal, konsisten Home */}
-      <div className="sticky top-0 z-30 backdrop-blur bg-zinc-950/70 ring-b ring-white/10">
-        <div className="max-w-7xl mx-auto px-4 py-3">
-          <HomeTopBar />
-        </div>
+      {/* Topbar tersambung ke live search */}
+      <div className="max-w-7xl mx-auto px-4 py-3">
+        <HomeTopBar searchQuery={topQuery} onSearch={setTopQuery} />
       </div>
 
-      {/* Header + Tabs + Search + Sort */}
-      <div className="max-w-7xl mx-auto px-4">
-        <div className="flex items-center justify-between gap-3">
-          <SectionHeader title="Library" />
-          <button
-            onClick={reload}
-            className="
-              inline-flex items-center gap-2
-              px-3 py-2 rounded-xl text-sm
-              bg-zinc-900/60 hover:bg-zinc-800
-              ring-1 ring-white/10
-            "
-            title="Refresh"
-          >
-            ↻ Refresh
-          </button>
-        </div>
-
-        {/* Tabs */}
-        <div className="mt-4 flex gap-2 overflow-x-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent pb-1">
-          {TABS.map((t) => {
-            const active = tab === t.key;
-            return (
+      {/* JIKA SEDANG CARI DI TOPBAR (>= 3 HURUF): TAMPILKAN HASIL INSTAN */}
+      {isTopSearchActive ? (
+        <div className="max-w-7xl mx-auto px-4 pb-[calc(72px+env(safe-area-inset-bottom,0))]">
+          <div className="space-y-4 min-h-[50vh]">
+            <div className="flex items-center justify-between">
+              <SectionHeader title={`Hasil Pencarian: "${topQuery}"`} />
               <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={clsx(
-                  "shrink-0 px-3 py-2 rounded-xl text-sm font-semibold ring-1 transition inline-flex items-center gap-2",
-                  active
-                    ? "bg-gradient-to-r from-brand-dark via-brand to-brand-light text-white ring-brand/30"
-                    : "bg-zinc-900/60 hover:bg-zinc-800 text-zinc-200 ring-white/10"
-                )}
+                onClick={() => setTopQuery("")}
+                className="text-xs text-brand hover:underline font-medium"
               >
-                <span>{t.label}</span>
-                <span
-                  className={clsx(
-                    "text-[11px] px-2 py-0.5 rounded-lg",
-                    active ? "bg-white/15" : "bg-white/10"
-                  )}
-                >
-                  {counts[t.key] ?? 0}
-                </span>
+                Kembali ke Library
               </button>
-            );
-          })}
-        </div>
-
-        {/* Search + Sort bar */}
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-[1fr_220px] gap-3">
-          {/* Search */}
-          <div className="relative">
-            <span className="absolute inset-y-0 left-3 flex items-center text-zinc-500">
-              <Search className="w-4 h-4" />
-            </span>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Cari di ${tabLabel}...`}
-              className="
-                w-full pl-9 pr-3 py-2.5 rounded-2xl
-                bg-zinc-900/60 ring-1 ring-white/10
-                text-sm placeholder:text-zinc-500
-                focus:outline-none focus:ring-brand
-              "
-            />
-          </div>
-
-          {/* Sort */}
-          <div className="flex items-center gap-2">
-            <div className="inline-flex items-center justify-center w-10 h-10 rounded-2xl bg-zinc-900/60 ring-1 ring-white/10">
-              <ArrowUpDown className="w-4 h-4 text-zinc-200" />
             </div>
 
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value)}
-              className="
-                w-full h-10 rounded-2xl px-3
-                bg-zinc-900/60 ring-1 ring-white/10
-                text-sm text-zinc-200
-                focus:outline-none focus:ring-brand
-              "
-            >
-              {SORTS.map((s) => (
-                <option key={s.key} value={s.key}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
+            {topSearching ? (
+              <GridCardSkeleton count={10} />
+            ) : topSearchResults.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+                {topSearchResults.map((it) => (
+                  <Card key={it.id || it.slug} item={it} />
+                ))}
+              </div>
+            ) : (
+              <div className="text-zinc-400 py-16 text-center bg-zinc-900/40 rounded-3xl ring-1 ring-white/5">
+                Tidak ada komik yang cocok dengan &quot;{topQuery}&quot;.
+              </div>
+            )}
           </div>
         </div>
+      ) : (
+        /* JIKA TIDAK SEARCH DI TOPBAR: TAMPILKAN KONTEN LIBRARY BIASA */
+        <>
+          <div className="max-w-7xl mx-auto px-4">
+            <div className="flex items-center justify-between gap-3">
+              <SectionHeader title="Library" />
+              <button
+                onClick={reload}
+                className="
+                  inline-flex items-center gap-2
+                  px-3 py-2 rounded-xl text-sm
+                  bg-zinc-900/60 hover:bg-zinc-800
+                  ring-1 ring-white/10
+                "
+                title="Refresh"
+              >
+                ↻ Refresh
+              </button>
+            </div>
 
-        {/* meta info */}
-        <div className="mt-3 text-xs text-zinc-500">
-          Menampilkan: <span className="text-zinc-300 font-semibold">{tabLabel}</span>{" "}
-          · Hasil: <span className="text-zinc-300 font-semibold">{list.length}</span>
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 pb-[calc(72px+env(safe-area-inset-bottom,0))]">
-        <div className="rounded-3xl ring-1 ring-white/10 bg-zinc-900/40 p-4 sm:p-6">
-          {busy ? (
-            tab === "history" ? <HistorySkeleton /> : <GridCardSkeleton count={10} />
-          ) : list.length === 0 ? (
-            <EmptyState tab={tab} />
-          ) : tab !== "history" ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
-              {list.map((it) => (
-                <div key={it.slug} className="group relative">
-                  <Card item={it} />
+            {/* Tabs */}
+            <div className="mt-4 flex gap-2 overflow-x-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent pb-1">
+              {TABS.map((t) => {
+                const active = tab === t.key;
+                return (
                   <button
-                    onClick={async (e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      await removeFromLibrary(tab, it.slug);
-                      await reload();
-                    }}
+                    key={t.key}
+                    onClick={() => setTab(t.key)}
                     className={clsx(
-                      "absolute top-2 right-2 z-20",
-                      "text-xs rounded-xl px-2 py-1",
-                      "bg-black/60 hover:bg-black/75 ring-1 ring-white/15 text-white",
-                      "opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition"
+                      "shrink-0 px-3 py-2 rounded-xl text-sm font-semibold ring-1 transition inline-flex items-center gap-2",
+                      active
+                        ? "bg-gradient-to-r from-brand-dark via-brand to-brand-light text-white ring-brand/30"
+                        : "bg-zinc-900/60 hover:bg-zinc-800 text-zinc-200 ring-white/10"
                     )}
-                    title="Remove"
                   >
-                    ✕
+                    <span>{t.label}</span>
+                    <span
+                      className={clsx(
+                        "text-[11px] px-2 py-0.5 rounded-lg",
+                        active ? "bg-white/15" : "bg-white/10"
+                      )}
+                    >
+                      {counts[t.key] ?? 0}
+                    </span>
                   </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
-          ) : (
-            <div className="space-y-2 sm:space-y-3">
-              {list.map((it) => (
-                <div
-                  key={it.slug}
+
+            {/* Filter lokal di halaman Library */}
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-[1fr_220px] gap-3">
+              <div className="relative">
+                <span className="absolute inset-y-0 left-3 flex items-center text-zinc-500">
+                  <Search className="w-4 h-4" />
+                </span>
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={`Cari di ${tabLabel}...`}
                   className="
-                    p-3 rounded-3xl
+                    w-full pl-9 pr-3 py-2.5 rounded-2xl
                     bg-zinc-900/60 ring-1 ring-white/10
-                    hover:bg-zinc-900 transition
-                    flex gap-3
+                    text-sm placeholder:text-zinc-500
+                    focus:outline-none focus:ring-brand
+                  "
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="inline-flex items-center justify-center w-10 h-10 rounded-2xl bg-zinc-900/60 ring-1 ring-white/10">
+                  <ArrowUpDown className="w-4 h-4 text-zinc-200" />
+                </div>
+
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value)}
+                  className="
+                    w-full h-10 rounded-2xl px-3
+                    bg-zinc-900/60 ring-1 ring-white/10
+                    text-sm text-zinc-200
+                    focus:outline-none focus:ring-brand
                   "
                 >
-                  <img
-                    src={it.cover}
-                    alt={it.title}
-                    className="w-20 h-28 rounded-2xl object-cover ring-1 ring-white/10 flex-none"
-                    loading="lazy"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="font-semibold line-clamp-1 text-sm sm:text-base">
-                      {it.title}
-                    </div>
-                    {it.updatedAt && (
-                      <div className="mt-1 text-[11px] sm:text-xs text-zinc-400">
-                        Update: {it.updatedAt}
-                      </div>
-                    )}
-                    <div className="mt-2">
-                      <a
-                        href={`/series/${it.slug}`}
-                        className="text-[11px] text-brand hover:underline"
+                  {SORTS.map((s) => (
+                    <option key={s.key} value={s.key}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-3 text-xs text-zinc-500">
+              Menampilkan: <span className="text-zinc-300 font-semibold">{tabLabel}</span> · Hasil:{" "}
+              <span className="text-zinc-300 font-semibold">{list.length}</span>
+            </div>
+          </div>
+
+          {/* List Koleksi */}
+          <div className="max-w-7xl mx-auto px-4 pb-[calc(72px+env(safe-area-inset-bottom,0))]">
+            <div className="rounded-3xl ring-1 ring-white/10 bg-zinc-900/40 p-4 sm:p-6">
+              {busy ? (
+                tab === "history" ? <HistorySkeleton /> : <GridCardSkeleton count={10} />
+              ) : list.length === 0 ? (
+                <EmptyState tab={tab} />
+              ) : tab !== "history" ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+                  {list.map((it) => (
+                    <div key={it.slug} className="group relative">
+                      <Card item={it} />
+                      <button
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          await removeFromLibrary(tab, it.slug);
+                          await reload();
+                        }}
+                        className={clsx(
+                          "absolute top-2 right-2 z-20",
+                          "text-xs rounded-xl px-2 py-1",
+                          "bg-black/60 hover:bg-black/75 ring-1 ring-white/15 text-white",
+                          "opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition"
+                        )}
+                        title="Remove"
                       >
-                        Buka series →
-                      </a>
+                        ✕
+                      </button>
                     </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-2 sm:space-y-3">
+                  {list.map((it) => (
+                    <div
+                      key={it.slug}
+                      className="
+                        p-3 rounded-3xl
+                        bg-zinc-900/60 ring-1 ring-white/10
+                        hover:bg-zinc-900 transition
+                        flex gap-3
+                      "
+                    >
+                      <img
+                        src={it.cover}
+                        alt={it.title}
+                        className="w-20 h-28 rounded-2xl object-cover ring-1 ring-white/10 flex-none"
+                        loading="lazy"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold line-clamp-1 text-sm sm:text-base">
+                          {it.title}
+                        </div>
+                        {it.updatedAt && (
+                          <div className="mt-1 text-[11px] sm:text-xs text-zinc-400">
+                            Update: {it.updatedAt}
+                          </div>
+                        )}
+                        <div className="mt-2">
+                          <a
+                            href={`/series/${it.slug}`}
+                            className="text-[11px] text-brand hover:underline"
+                          >
+                            Buka series →
+                          </a>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          await removeFromLibrary("history", it.slug);
+                          await reload();
+                        }}
+                        className="
+                          ml-auto text-[11px]
+                          bg-zinc-800 hover:bg-zinc-700
+                          ring-1 ring-white/10
+                          rounded-2xl px-3 py-1 h-fit self-center
+                        "
+                      >
+                        Hapus
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!busy && list.length > 0 && (
+                <div className="pt-4 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="text-xs text-zinc-500">
+                    Tip: pakai search untuk cari judul cepat.
                   </div>
 
                   <button
-                    onClick={async (e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      await removeFromLibrary("history", it.slug);
+                    onClick={async () => {
+                      await clearSection(tab);
                       await reload();
                     }}
                     className="
-                      ml-auto text-[11px]
-                      bg-zinc-800 hover:bg-zinc-700
+                      text-xs px-4 py-2 rounded-2xl
+                      bg-zinc-900/70 hover:bg-zinc-800
                       ring-1 ring-white/10
-                      rounded-2xl px-3 py-1 h-fit self-center
                     "
                   >
-                    Hapus
+                    Bersihkan {tabLabel}
                   </button>
                 </div>
-              ))}
+              )}
             </div>
-          )}
-
-          {!busy && list.length > 0 && (
-            <div className="pt-4 flex items-center justify-between gap-3 flex-wrap">
-              <div className="text-xs text-zinc-500">
-                Tip: pakai search untuk cari judul cepat.
-              </div>
-
-              <button
-                onClick={async () => {
-                  await clearSection(tab);
-                  await reload();
-                }}
-                className="
-                  text-xs px-4 py-2 rounded-2xl
-                  bg-zinc-900/70 hover:bg-zinc-800
-                  ring-1 ring-white/10
-                "
-              >
-                Bersihkan {tabLabel}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
