@@ -2,13 +2,8 @@
 import axios from "axios";
 
 /* ======================= BASE & AXIOS ======================= */
-// Jika di production Vercel dan tidak ada override env, gunakan proxy /api-proxy
-const defaultBase = import.meta.env.PROD
-  ? "/api-proxy"
-  : "https://gv-comics-api-2.vercel.app";
-
 export let API_BASE = (
-  import.meta?.env?.VITE_API_BASE || defaultBase
+  import.meta?.env?.VITE_API_BASE || "https://gv-comics-api-2.vercel.app"
 ).replace(/\/+$/, "");
 
 const baseHasApi = /\/api$/i.test(API_BASE);
