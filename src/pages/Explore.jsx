@@ -8,7 +8,7 @@ import Pagination from '../components/Pagination';
 import HomeTopBar from '../components/HomeTopBar';
 import { Eye } from 'lucide-react';
 
-// Swiper
+// Swi
 import { Swiper, SwiperSlide } from 'swiper/react';
 import {
   Autoplay,
