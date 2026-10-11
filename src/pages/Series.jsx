@@ -558,7 +558,13 @@ return (
     </div>
   </div>
 </div>
-
+        {/* Sidebar (stack di mobile) */}
+        <aside className="space-y-3">
+          <InfoCard label="Author" value={detail.author} />
+          <InfoCard label="Artist" value={detail.artist} />
+          <InfoCard label="Format" value={detail.format || detail.type} />
+          <InfoCard label="Status" value={detail.status} />
+        </aside>
 
       {/* Body: Deskripsi + Chapters + Sidebar Info */}
       <div className="grid md:grid-cols-[1fr_320px] gap-6 md:gap-8">
@@ -716,14 +722,6 @@ return (
             )}
           </div>
             </div>
-
-        {/* Sidebar (stack di mobile) */}
-        <aside className="space-y-3">
-          <InfoCard label="Author" value={detail.author} />
-          <InfoCard label="Artist" value={detail.artist} />
-          <InfoCard label="Format" value={detail.format || detail.type} />
-          <InfoCard label="Status" value={detail.status} />
-        </aside>
       </div>
     </div>
   );

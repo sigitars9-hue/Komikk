@@ -20,6 +20,7 @@ import ApiGenerator from './pages/ApiGenerator';
 import GeneratorPage from './pages/Generator'; // kalau masih dipakai
 
 import NotFound from './pages/NotFound';
+import ProfilePage from "./pages/Profile";
 
 export default function App() {
   const loc = useLocation();
@@ -57,10 +58,11 @@ export default function App() {
           {/* Kalau GeneratorPage masih dipakai di route lain, tambahkan juga:
               <Route path="/generator-tools" element={<GeneratorPage />} />
           */}
-
+  <Route path="/profile" element={<ProfilePage />} />
           {/* 404 */}
           <Route path="*" element={<NotFound />} />
         </Routes>
+        
       </main>
 
       {/* BottomNav hanya di non-reader pages */}

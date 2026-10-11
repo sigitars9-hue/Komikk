@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 
 /* ─── Utils ─── */
@@ -82,6 +82,19 @@ async function httpJson(path, { method = "GET", body } = {}) {
   }
   if (!res.ok) throw new Error(json?.error || json?._raw || `HTTP ${res.status}`);
   return json;
+}
+
+async function getSeriesLatest({ page = 1, pageSize = 2000 } = {}) {
+  return httpJson(`/series/latest?page=${page}&pageSize=${pageSize}`);
+}
+
+async function getSeriesChapters(slug, { page = 1, pageSize = 5000 } = {}) {
+  return httpJson(`/series/${encodeURIComponent(slug)}/chapters?page=${page}&pageSize=${pageSize}`);
+}
+
+// ambil pages chapter (full URL) dari id
+async function getChapterPagesById(id) {
+  return httpJson(`/chapter/${encodeURIComponent(id)}`);
 }
 
 // 🟣 Series: body tetap { slug, title, ... }, hanya ditambah field bucket
@@ -197,6 +210,17 @@ export default function ApiGenerator() {
   // ➕ bucket target data.json mana
   const [bucket, setBucket] = useState("data1");
 
+  /* ─── Remote Data (Read from API/GitHub) ─── */
+  const [remoteSeries, setRemoteSeries] = useState([]);
+  const [remoteLoading, setRemoteLoading] = useState(false);
+
+  const [seriesQuery, setSeriesQuery] = useState("");
+  const [seriesSort, setSeriesSort] = useState("updated"); // updated | title | views | bookmarks
+
+  const [selectedSeriesSlug, setSelectedSeriesSlug] = useState(""); // dropdown series selected
+
+  const [remoteChapters, setRemoteChapters] = useState([]);
+  const [chaptersLoading, setChaptersLoading] = useState(false);
 
   /* Series form */
   const [title, setTitle] = useState("");
@@ -333,6 +357,79 @@ const chapterOnly = useMemo(() => {
   nowIso,
 ]);
 
+  /* ─── Remote fetch handlers ─── */
+  async function refreshSeriesList() {
+    try {
+      setRemoteLoading(true);
+      const out = await getSeriesLatest({ page: 1, pageSize: 2000 });
+      setRemoteSeries(Array.isArray(out?.items) ? out.items : []);
+    } catch (e) {
+      toast.error(e.message || "Gagal mengambil daftar series");
+      setRemoteSeries([]);
+    } finally {
+      setRemoteLoading(false);
+    }
+  }
+
+  async function refreshChaptersFor(slug) {
+    if (!slug) {
+      setRemoteChapters([]);
+      return;
+    }
+    try {
+      setChaptersLoading(true);
+      const out = await getSeriesChapters(slug, { page: 1, pageSize: 5000 });
+      setRemoteChapters(Array.isArray(out?.items) ? out.items : []);
+    } catch (e) {
+      toast.error(e.message || "Gagal mengambil daftar chapter");
+      setRemoteChapters([]);
+    } finally {
+      setChaptersLoading(false);
+    }
+  }
+
+  // load series list saat halaman pertama dibuka
+  useEffect(() => {
+    refreshSeriesList();
+  }, []);
+
+  // saat user pilih series: auto isi slug & fetch chapters
+  useEffect(() => {
+    if (!selectedSeriesSlug) return;
+    setSeriesSlugForChapter(selectedSeriesSlug);
+    refreshChaptersFor(selectedSeriesSlug);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSeriesSlug]);
+
+  // series list: search + sort
+  const filteredSeries = useMemo(() => {
+    const q = seriesQuery.trim().toLowerCase();
+    let list = Array.isArray(remoteSeries) ? [...remoteSeries] : [];
+
+    if (q) {
+      list = list.filter((s) =>
+        String(s?.title || "").toLowerCase().includes(q) ||
+        String(s?.slug || "").toLowerCase().includes(q)
+      );
+    }
+
+    if (seriesSort === "title") {
+      list.sort((a, b) => String(a?.title || "").localeCompare(String(b?.title || "")));
+    } else if (seriesSort === "views") {
+      list.sort((a, b) => Number(b?.views || 0) - Number(a?.views || 0));
+    } else if (seriesSort === "bookmarks") {
+      list.sort((a, b) => Number(b?.bookmarks || 0) - Number(a?.bookmarks || 0));
+    } else {
+      list.sort((a, b) => {
+        const ta = Date.parse(a?.updatedAt || 0) || 0;
+        const tb = Date.parse(b?.updatedAt || 0) || 0;
+        return tb - ta;
+      });
+    }
+
+    return list;
+  }, [remoteSeries, seriesQuery, seriesSort]);
+
 
   /* Actions */
   async function onSendSeries() {
@@ -350,37 +447,96 @@ const chapterOnly = useMemo(() => {
   }
 
 
-  async function onSendChapter() {
+async function onSendChapter() {
+  try {
+    if (!ADMIN_TOKEN) return toast.error("VITE_ADMIN_TOKEN belum diset.");
+    if (!seriesSlugForChapter.trim())
+      return toast.error("Isi Series Slug dulu.");
+
+    if (chapterMode === "comic" && chImages.length === 0)
+      return toast.error("Mode komik: isi minimal 1 URL gambar.");
+    if (chapterMode === "novel" && !chText.trim())
+      return toast.error("Mode novel: isi teks chapter dulu.");
+
+    if (!chapterOnly)
+      return toast.error("Data chapter belum lengkap.");
+
+    setBusy(true);
+
+    const out = await createOrUpdateChapter(
+      seriesSlugForChapter.trim(),
+      chapterOnly,
+      bucket
+    );
+
+    const uploadedNo = out?.chapter?.number ?? chapterOnly?.number ?? chNo;
+
+    toast.success(`Chapter ${uploadedNo} tersimpan.`);
+
+    // ✅ Popup pengingat upload chapter berapa
+    setSuccessInfo({
+      title: `Berhasil upload/update chapter [${uploadedNo}] untuk '${seriesSlugForChapter.trim()}'`,
+    });
+    setSuccessOpen(true);
+
+    // ✅ Reset input URL gambar / teks setelah sukses upload
+    // Target series tetap
+    setChTitle("");
+    setChNo(String((Number(uploadedNo) || 1) + 1)); // optional: auto next chapter
+
+    if (chapterMode === "comic") {
+      setChImagesRaw("");      // ✅ ini yang kamu minta: url sebelumnya hilang
+      setChCover("");          // optional reset cover manual
+      setChAutoCover(true);    // optional balikin default
+    } else {
+      setChText("");           // reset text novel
+    }
+              // refresh list chapter biar langsung update di panel
+    refreshChaptersFor(seriesSlugForChapter.trim());
+  } catch (e) {
+    toast.error(e.message || "Gagal kirim chapter");
+  } finally {
+    setBusy(false);
+  }
+}
+
+  async function onLoadChapterToForm(ch) {
     try {
-      if (!ADMIN_TOKEN) return toast.error("VITE_ADMIN_TOKEN belum diset.");
+      if (!ch?.id) return toast.error("Chapter tidak punya id.");
       if (!seriesSlugForChapter.trim())
-        return toast.error("Isi Series Slug dulu.");
-
-      if (chapterMode === "comic" && chImages.length === 0)
-        return toast.error("Mode komik: isi minimal 1 URL gambar.");
-      if (chapterMode === "novel" && !chText.trim())
-        return toast.error("Mode novel: isi teks chapter dulu.");
-
-      if (!chapterOnly)
-        return toast.error("Data chapter belum lengkap.");
+        return toast.error("Pilih series dulu.");
 
       setBusy(true);
-      const out = await createOrUpdateChapter(
-        seriesSlugForChapter.trim(),
-        chapterOnly,
-        bucket
-      );
-      toast.success(`Chapter ${out?.chapter?.number ?? ""} tersimpan.`);
-      setSuccessInfo({
-        title: `Chapter tersimpan untuk '${seriesSlugForChapter.trim()}'`,
-      });
-      setSuccessOpen(true);
+
+      // ambil detail (pages) dari API
+      const detail = await getChapterPagesById(ch.id);
+
+      setChapterMode("comic");
+      setChNo(String(ch.number || 1));
+      setChTitle(ch.title || "");
+
+      // publishedAt ISO -> datetime-local
+      const iso = detail?.publishedAt || ch?.publishedAt || null;
+      if (iso) {
+        const d = new Date(iso);
+        const fixed = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+        setChDate(fixed.toISOString().slice(0, 16));
+      }
+
+      const pages = Array.isArray(detail?.pages) ? detail.pages : [];
+      setChImagesRaw(pages.join("\n"));
+
+      setChAutoCover(true);
+      setChCover("");
+
+      toast.success(`Chapter ${ch.number} dimuat ke form (siap update).`);
     } catch (e) {
-      toast.error(e.message || "Gagal kirim chapter");
+      toast.error(e.message || "Gagal load chapter");
     } finally {
       setBusy(false);
     }
   }
+
 
   async function onDeleteChapter() {
     try {
@@ -648,71 +804,188 @@ const chapterOnly = useMemo(() => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           <div className="space-y-4 sm:space-y-6">
             {/* Target Series + Mode Chapter */}
-            <Box title="Target Series">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <Field label="Series Slug (wajib)">
-                  <input
-                    value={seriesSlugForChapter}
-                    onChange={(e) =>
-                      setSeriesSlugForChapter(slugify(e.target.value))
-                    }
-                    className="w-full rounded-lg bg-zinc-900/60 ring-1 ring-white/10 px-3 py-2.5"
-                    placeholder="mis. infinity-nudes"
-                  />
-                </Field>
+<Box title="Target Series">
+  {/* ✅ BLOK TARGET SERIES: FULL WIDTH */}
+  <Field label="Target Series (Auto dari API GitHub)">
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <input
+          value={seriesQuery}
+          onChange={(e) => setSeriesQuery(e.target.value)}
+          className="flex-1 rounded-lg bg-zinc-900/60 ring-1 ring-white/10 px-3 py-2.5"
+          placeholder="Cari series (judul/slug)…"
+        />
 
-                <Field label="Nomor Chapter">
-                  <input
-                    value={chNo}
-                    onChange={(e) =>
-                      setChNo(e.target.value.replace(/[^\d]/g, ""))
-                    }
-                    className="w-full rounded-lg bg-zinc-900/60 ring-1 ring-white/10 px-3 py-2.5"
-                    inputMode="numeric"
-                  />
-                </Field>
+        <button
+          type="button"
+          onClick={refreshSeriesList}
+          className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 ring-1 ring-white/10 whitespace-nowrap"
+        >
+          {remoteLoading ? "Loading…" : "Refresh"}
+        </button>
+      </div>
 
-                <Field label="Judul (opsional)">
-                  <input
-                    value={chTitle}
-                    onChange={(e) => setChTitle(e.target.value)}
-                    className="w-full rounded-lg bg-zinc-900/60 ring-1 ring-white/10 px-3 py-2.5"
-                  />
-                </Field>
+      <div className="flex gap-2 flex-wrap">
+        <Chip active={seriesSort === "updated"} onClick={() => setSeriesSort("updated")}>
+          Updated
+        </Chip>
+        <Chip active={seriesSort === "title"} onClick={() => setSeriesSort("title")}>
+          Title
+        </Chip>
+        <Chip active={seriesSort === "views"} onClick={() => setSeriesSort("views")}>
+          Views
+        </Chip>
+        <Chip active={seriesSort === "bookmarks"} onClick={() => setSeriesSort("bookmarks")}>
+          Bookmarks
+        </Chip>
+      </div>
 
-                <Field label="Tanggal Rilis (opsional)">
-                  <input
-                    type="datetime-local"
-                    value={chDate}
-                    onChange={(e) => setChDate(e.target.value)}
-                    className="w-full rounded-lg bg-zinc-900/60 ring-1 ring-white/10 px-3 py-2.5"
-                  />
-                </Field>
+      <select
+        value={selectedSeriesSlug}
+        onChange={(e) => setSelectedSeriesSlug(e.target.value)}
+        className="w-full rounded-lg bg-zinc-900/60 ring-1 ring-white/10 px-3 py-2.5"
+      >
+        <option value="">
+          {remoteLoading ? "Loading series…" : "Pilih series…"}
+        </option>
+        {filteredSeries.map((s) => (
+          <option key={s.slug} value={s.slug}>
+            {s.title} ({s.slug})
+          </option>
+        ))}
+      </select>
+    </div>
+  </Field>
+
+  {/* ✅ SLUG OTOMATIS TERISI DARI DROPDOWN */}
+  <Field label="Series Slug (Auto)">
+    <input
+      value={seriesSlugForChapter}
+      readOnly
+      className="w-full rounded-lg bg-zinc-900/60 ring-1 ring-white/10 px-3 py-2.5 opacity-80 cursor-not-allowed"
+    />
+    <div className="text-[11px] sm:text-xs text-zinc-500 mt-1">
+      Slug ini otomatis terisi saat admin memilih series dari dropdown.
+    </div>
+  </Field>
+
+  {/* ✅ FORM CHAPTER: BARU GRID 2 KOLOM */}
+  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-4">
+    <Field label="Nomor Chapter">
+      <input
+        value={chNo}
+        onChange={(e) => setChNo(e.target.value.replace(/[^\d]/g, ""))}
+        className="w-full rounded-lg bg-zinc-900/60 ring-1 ring-white/10 px-3 py-2.5"
+        inputMode="numeric"
+      />
+    </Field>
+
+    <Field label="Judul (opsional)">
+      <input
+        value={chTitle}
+        onChange={(e) => setChTitle(e.target.value)}
+        className="w-full rounded-lg bg-zinc-900/60 ring-1 ring-white/10 px-3 py-2.5"
+      />
+    </Field>
+
+    <Field label="Tanggal Rilis (opsional)">
+      <input
+        type="datetime-local"
+        value={chDate}
+        onChange={(e) => setChDate(e.target.value)}
+        className="w-full rounded-lg bg-zinc-900/60 ring-1 ring-white/10 px-3 py-2.5"
+      />
+    </Field>
+  </div>
+
+  {/* PILIHAN MODE CHAPTER */}
+  <div className="mt-4">
+    <div className="text-sm font-medium mb-1">Tipe Chapter</div>
+    <div className="flex gap-2 flex-wrap">
+      <Chip active={chapterMode === "comic"} onClick={() => setChapterMode("comic")}>
+        Komik (gambar)
+      </Chip>
+      <Chip active={chapterMode === "novel"} onClick={() => setChapterMode("novel")}>
+        Novel (teks)
+      </Chip>
+    </div>
+    <div className="text-[11px] sm:text-xs text-zinc-400 mt-1">
+      Pilih <b>Novel (teks)</b> kalau ingin chapter dibaca di <b>NovelReader</b>.
+    </div>
+  </div>
+</Box>
+
+{seriesSlugForChapter.trim() && (
+  <Box
+    title={`Chapter List (${remoteChapters.length})`}
+    actions={
+      <button
+        type="button"
+        onClick={() => refreshChaptersFor(seriesSlugForChapter.trim())}
+        className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs ring-1 ring-white/10"
+      >
+        {chaptersLoading ? "…" : "Refresh"}
+      </button>
+    }
+  >
+    {chaptersLoading ? (
+      <div className="text-sm text-zinc-400">Mengambil daftar chapter…</div>
+    ) : remoteChapters.length === 0 ? (
+      <div className="text-sm text-zinc-400">Belum ada chapter.</div>
+    ) : (
+      <div className="space-y-2 max-h-[320px] overflow-auto pr-1">
+        {[...remoteChapters]
+          .sort((a, b) => Number(b?.number || 0) - Number(a?.number || 0))
+          .map((ch) => (
+            <div
+              key={ch.id}
+              className="flex items-center gap-2 rounded-xl bg-zinc-950/60 ring-1 ring-white/10 p-2"
+            >
+              <div className="w-12 h-16 rounded-lg overflow-hidden bg-zinc-800 ring-1 ring-white/10 shrink-0">
+                {ch.thumbnail ? (
+                  <img src={ch.thumbnail} className="w-full h-full object-cover" loading="lazy" />
+                ) : null}
               </div>
 
-              {/* PILIHAN MODE CHAPTER */}
-              <div className="mt-4">
-                <div className="text-sm font-medium mb-1">Tipe Chapter</div>
-                <div className="flex gap-2 flex-wrap">
-                  <Chip
-                    active={chapterMode === "comic"}
-                    onClick={() => setChapterMode("comic")}
-                  >
-                    Komik (gambar)
-                  </Chip>
-                  <Chip
-                    active={chapterMode === "novel"}
-                    onClick={() => setChapterMode("novel")}
-                  >
-                    Novel (teks)
-                  </Chip>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold truncate">
+                  Ch. {ch.number} — {ch.title || `Chapter ${ch.number}`}
                 </div>
-                <div className="text-[11px] sm:text-xs text-zinc-400 mt-1">
-                  Pilih <b>Novel (teks)</b> kalau ingin chapter dibaca di{" "}
-                  <b>NovelReader</b>.
+                <div className="text-[11px] text-zinc-400 truncate">
+                  ID: <code>{ch.id}</code>
                 </div>
               </div>
-            </Box>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onLoadChapterToForm(ch)}
+                  className="px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-60 text-white text-xs font-semibold"
+                >
+                  Load
+                </button>
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setDeleteChSlug(seriesSlugForChapter.trim());
+                    setDeleteChCode(ch.id);
+                    setConfirmMode("chapter");
+                    setConfirmOpen(true);
+                  }}
+                  className="px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-60 text-white text-xs font-semibold"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+      </div>
+    )}
+  </Box>
+)}
 
             {/* MODE KOMIK: halaman & thumbnail */}
             {chapterMode === "comic" && (
