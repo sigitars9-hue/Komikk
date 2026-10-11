@@ -81,7 +81,7 @@ export default function Card({ item, hideTitle = false }) {
         )}
       </Link>
 
-      {/* ✅ Popup ditempatkan DI LUAR Link */}
+      {/* opup ditempatkan DI LUAR Link */}
 <LatestChaptersPopup
   slug={item?.slug}
   title={item?.title}
