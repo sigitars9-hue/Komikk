@@ -2,13 +2,8 @@
 import axios from "axios";
 
 /* ======================= BASE & AXIOS ======================= */
-// Gunakan relative proxy di environment production Vercel untuk bypass CORS
-const defaultBase = import.meta.env.PROD
-  ? "/api-proxy"
-  : "https://gv-comics-api-2.vercel.app";
-
 export let API_BASE = (
-  import.meta?.env?.VITE_API_BASE || defaultBase
+  import.meta?.env?.VITE_API_BASE || "https://gv-comics-api-2.vercel.app"
 ).replace(/\/+$/, "");
 
 const baseHasApi = /\/api$/i.test(API_BASE);
@@ -224,18 +219,16 @@ export async function fetchSlider() {
 /* =========================== ANNOUNCEMENTS ======================= */
 export async function fetchAnnouncements() {
   const { data } = await tryGET(["/announcements", "/announcement", "/news"]);
-  const r = data?.data || data;
-  if (Array.isArray(r)) return r;
-  if (Array.isArray(r?.announcements)) return r.announcements;
-  return r?.items || [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.announcements)) return data.announcements;
+  return data.items || [];
 }
 
 /* ======================= LATEST / UPDATES ======================== */
 export async function fetchLatest(page = 1, pageSize = 20) {
   const qp = `?page=${page}&pageSize=${pageSize}`;
   const { data } = await tryGET([`/series/latest${qp}`, `/latest${qp}`, `/manga/latest${qp}`]);
-  const r = data?.data || data;
-  const list = Array.isArray(r) ? r : r?.items || [];
+  const list = Array.isArray(data) ? data : data.items || [];
   return list.map(mapItem);
 }
 
@@ -243,8 +236,7 @@ export async function fetchLatest(page = 1, pageSize = 20) {
 export async function fetchPopular(range = "daily") {
   const qs = `?range=${encodeURIComponent(range)}`;
   const { data } = await tryGET([`/series/popular${qs}`, `/popular${qs}`, `/manga/popular${qs}`]);
-  const r = data?.data || data;
-  const list = Array.isArray(r) ? r : r?.items || [];
+  const list = Array.isArray(data) ? data : data.items || [];
   return list.map(mapItem);
 }
 
@@ -256,16 +248,14 @@ export async function fetchRecommendations(kind = "manhwa") {
     `/recommendations${qs}`,
     `/manga/recommendations${qs}`,
   ]);
-  const r = data?.data || data;
-  const list = Array.isArray(r) ? r : r?.items || [];
+  const list = Array.isArray(data) ? data : data.items || [];
   return list.map(mapItem);
 }
 
 /* =========================== GENRES & FILTER ===================== */
 export async function fetchGenres() {
   const { data } = await tryGET(["/genres", "/series/genres", "/manga/genres"]);
-  const r = data?.data || data;
-  const arr = Array.isArray(r) ? r : r?.items || [];
+  const arr = Array.isArray(data) ? data : data.items || [];
   return arr.map((g) => (typeof g === "string" ? g : g?.name)).filter(Boolean);
 }
 
@@ -278,80 +268,51 @@ export async function fetchByGenre(name, page = 1, pageSize = 20) {
     `/series/genre/${enc}${qp}`,
     `/manga/genre/${enc}${qp}`,
   ]);
-  const r = data?.data || data;
-  const list = Array.isArray(r) ? r : r?.items || [];
+  const list = Array.isArray(data) ? data : data.items || [];
   return list.map(mapItem);
 }
 
 /* ========================= DETAIL & CHAPTERS ===================== */
 export async function fetchSeries(slugOrId) {
   if (!slugOrId) throw new Error("slug kosong");
-  const enc = encodeURIComponent(String(slugOrId));
+  let baseSlug = String(slugOrId);
+  if (/-\d{2,}$/.test(baseSlug)) {
+    baseSlug = baseSlug.replace(/-\d{2,}$/, "");
+  }
+  const enc = encodeURIComponent(baseSlug);
   const { data } = await tryGET([`/series/${enc}`, `/manga/${enc}`]);
   return normalizeSeries(data);
 }
 
 export async function fetchChapters(slug, page = 1) {
-  const enc = encodeURIComponent(String(slug));
-  try {
-    const { data } = await tryGET([
-      `/series/${enc}/chapters?page=${page}`,
-      `/manga/${enc}/chapters?page=${page}`,
-      `/chapters/${enc}?page=${page}`,
-      `/series/${enc}`,
-      `/manga/${enc}`,
-    ]);
-
-    const r = data?.data || data;
-    const chaptersRaw = Array.isArray(r)
-      ? r
-      : r?.chapters || r?.chapter || data?.chapters || [];
-
-    if (Array.isArray(chaptersRaw) && chaptersRaw.length) {
-      return chaptersRaw.map((c, i) => normalizeChapter(c, i, slug));
-    }
-  } catch (e) {
-    console.error("fetchChapters error:", e);
-  }
-
-  // Fallback melalui detail series
   const detail = await fetchSeries(slug);
-  return detail?.chapters || [];
+  if (Array.isArray(detail?.chapters) && detail.chapters.length) return detail.chapters;
+
+  const enc = encodeURIComponent(slug);
+  const { data } = await tryGET([
+    `/series/${enc}/chapters?page=${page}`,
+    `/manga/${enc}/chapters?page=${page}`,
+    `/chapters/${enc}?page=${page}`,
+  ]);
+  const raw = Array.isArray(data) ? data : data.items || [];
+  return raw.map((c, i) => normalizeChapter(c, i, slug));
 }
 
 /* ======================= CHAPTER PAGES (READER) ================== */
 export async function fetchChapterPages(chapterOrId) {
-  // Jika parameter sudah membawa objek chapter dengan daftar gambar
   if (chapterOrId && typeof chapterOrId === "object") {
     const ch = normalizeChapter(chapterOrId);
-    if (ch?.images?.length) {
-      return ch.images.map((url, i) => ({ index: i, imageUrl: url }));
-    }
+    const urls = ch.images || [];
+    return urls.map((url, i) => ({ index: i, imageUrl: url }));
   }
-
-  const id = typeof chapterOrId === "object" ? chapterOrId.id || chapterOrId.slug : String(chapterOrId);
-  const enc = encodeURIComponent(id);
-
+  const id = String(chapterOrId);
   const { data } = await tryGET([
-    `/chapter/${enc}`,
-    `/series/chapter/${enc}`,
-    `/manga/chapter/${enc}`,
-    `/chapters/${enc}`,
+    `/chapter/${encodeURIComponent(id)}`,
+    `/manga/chapter/${encodeURIComponent(id)}`,
+    `/chapters/${encodeURIComponent(id)}`,
   ]);
-
-  // Handle format response yang dibungkus data.data maupun data langsung
-  const r = data?.data || data;
-  const chapterData = r?.chapter || r;
-
   const rawList =
-    (Array.isArray(r) ? r : null) ||
-    chapterData?.pages ||
-    chapterData?.images ||
-    chapterData?.content ||
-    data?.pages ||
-    data?.images ||
-    [];
-
+    (Array.isArray(data) ? data : data?.pages || data?.images || data?.content || []) || [];
   const urls = pickImageUrls(rawList);
   return urls.map((url, i) => ({ index: i, imageUrl: url }));
 }
@@ -361,8 +322,7 @@ export async function fetchSearch(q, page = 1, pageSize = 20) {
   const qp = `?q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}`;
   try {
     const { data } = await tryGET([`/search${qp}`, `/series/search${qp}`, `/manga/search${qp}`]);
-    const r = data?.data || data;
-    const list = Array.isArray(r) ? r : r?.items || [];
+    const list = Array.isArray(data) ? data : data.items || [];
     return list.map(mapItem);
   } catch {
     const all = await searchSeries(q);
@@ -374,8 +334,7 @@ export async function fetchSearch(q, page = 1, pageSize = 20) {
 export async function searchSeries(q) {
   const qp = `?q=${encodeURIComponent(q)}`;
   const { data } = await tryGET([`/search${qp}`, `/series/search${qp}`, `/manga/search${qp}`]);
-  const r = data?.data || data;
-  const list = Array.isArray(r) ? r : r?.items || [];
+  const list = Array.isArray(data) ? data : data.items || [];
   return list.map(mapItem);
 }
 
