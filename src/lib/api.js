@@ -3,7 +3,7 @@ import axios from "axios";
 
 /* ======================= BASE & AXIOS ======================= */
 export let API_BASE = (
-  import.meta?.env?.VITE_API_BASE || "https://gv-comics-api-2.vercel.app"
+  import.meta?.env?.VITE_API_BASE || "/comics-api"
 ).replace(/\/+$/, "");
 
 const baseHasApi = /\/api$/i.test(API_BASE);
