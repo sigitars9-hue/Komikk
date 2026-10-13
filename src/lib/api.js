@@ -1,7 +1,6 @@
 // src/lib/api.js
 import axios from "axios";
 
-/* ======================= BASE & AXIOS ======================= */
 // Contoh .env: VITE_API_BASE=https://gv-comics-api-2.vercel.app/api
 export let API_BASE = (
   import.meta?.env?.VITE_API_BASE || "https://gv-comics-api-2.vercel.app"
