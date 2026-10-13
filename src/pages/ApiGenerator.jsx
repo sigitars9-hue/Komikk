@@ -24,51 +24,32 @@ const slugify = (s = "") =>
 
 
 
-const parseImageList = (raw) => {
 
-  if (!raw) return [];
+const parseImageList = (raw = "") => {
+  if (!raw.trim()) return [];
 
-  const toks = raw
+  // Ekstensi gambar yang didukung
+  const imagePattern =
+    /https?:\/\/[^\s"'<>]+?\.(?:avif|webp|jpe?g|png|gif|bmp)(?:\?[^\s"'<>]*)?/gi;
 
-    .split(/[\n,]+/)
+  // Bersihkan teks dan ekstrak URL gambar dari URL biasa atau HTML
+  const matches = raw.match(imagePattern) || [];
 
-    .map((s) => s.trim())
+  const cleanUrl = (value) => {
+    return value
+      .replace(/&amp;/gi, "&")
+      .replace(/[),;]+$/, "")
+      .trim();
+  };
 
-    .filter(Boolean)
+  const urls = matches
+    .map(cleanUrl)
+    .filter((url) => /^https?:\/\//i.test(url));
 
-    .map((s) => {
-
-      if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")))
-
-        s = s.slice(1, -1).trim();
-
-      if (s.endsWith(",")) s = s.slice(0, -1);
-
-      return s.trim();
-
-    })
-
-    .filter((u) => /^https?:\/\//i.test(u));
-
-  const uniq = [];
-
-  const seen = new Set();
-
-  for (const u of toks) {
-
-    if (!seen.has(u)) {
-
-      seen.add(u);
-
-      uniq.push(u);
-
-    }
-
-  }
-
-  return uniq;
-
+  // Hapus URL duplikat tanpa mengubah urutan
+  return [...new Set(urls)];
 };
+
 
 
 
