@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import toast from "react-hot-toast";
 
@@ -372,7 +372,7 @@ export default function AdminDashboard() {
   const [isSidebarOpen, setSidebarOpen] = useState(false);
 
   const [busy, setBusy] = useState(false);
-
+  const chapterSubmitLock = useRef(false);
   const [bucket, setBucket] = useState("data1");
 
 
@@ -853,7 +853,9 @@ const [editSearchOpen, setEditSearchOpen] = useState(false);
         toast.error("Lengkapi judul, slug, sinopsis, cover, dan minimal 1 genre.");
         return;
       }
+if (chapterSubmitLock.current) return;
 
+chapterSubmitLock.current = true;
       setBusy(true);
       const isEditing = Boolean(editingSlug);
       const timestamp = new Date().toISOString();
@@ -950,10 +952,9 @@ const [editSearchOpen, setEditSearchOpen] = useState(false);
       toast.error(e.message || "Gagal kirim chapter");
 
     } finally {
-
-      setBusy(false);
-
-    }
+  chapterSubmitLock.current = false;
+  setBusy(false);
+}
 
   }
 
