@@ -853,9 +853,6 @@ const [editSearchOpen, setEditSearchOpen] = useState(false);
         toast.error("Lengkapi judul, slug, sinopsis, cover, dan minimal 1 genre.");
         return;
       }
-if (chapterSubmitLock.current) return;
-
-chapterSubmitLock.current = true;
       setBusy(true);
       const isEditing = Boolean(editingSlug);
       const timestamp = new Date().toISOString();
@@ -896,67 +893,78 @@ chapterSubmitLock.current = true;
   }
 
   async function onSendChapter() {
+  // Cegah request ganda sebelum proses async dimulai.
+  if (chapterSubmitLock.current) return;
 
-    try {
-
-      if (!ADMIN_TOKEN) return toast.error("VITE_ADMIN_TOKEN belum diset.");
-
-      if (!seriesSlugForChapter.trim()) return toast.error("Pilih Series tujuan.");
-
-      if (chapterMode === "comic" && chImages.length === 0) return toast.error("Masukkan minimal 1 URL gambar.");
-
-      if (chapterMode === "novel" && !chText.trim()) return toast.error("Teks novel tidak boleh kosong.");
-
-      if (!chapterOnly) return toast.error("Data chapter tidak valid.");
-
-
-
-      setBusy(true);
-
-      const out = await createOrUpdateChapter(seriesSlugForChapter.trim(), chapterOnly, bucket);
-
-      const uploadedNo = out?.chapter?.number ?? chapterOnly?.number ?? chNo;
-
-
-
-      toast.success(`Chapter ${uploadedNo} berhasil disimpan!`);
-
-      setSuccessInfo({ title: `Chapter [${uploadedNo}] berhasil diupload ke '${seriesSlugForChapter.trim()}'` });
-
-      setSuccessOpen(true);
-
-
-
-      setChTitle("");
-
-      setChNo(String((Number(uploadedNo) || 1) + 1));
-
-      if (chapterMode === "comic") {
-
-        setChImagesRaw("");
-
-        setChCover("");
-
-        setChAutoCover(true);
-
-      } else {
-
-        setChText("");
-
-      }
-
-      await refreshChaptersFor(seriesSlugForChapter.trim());
-
-    } catch (e) {
-
-      toast.error(e.message || "Gagal kirim chapter");
-
-    } finally {
-  chapterSubmitLock.current = false;
-  setBusy(false);
-}
-
+  if (!ADMIN_TOKEN) {
+    toast.error("VITE_ADMIN_TOKEN belum diset.");
+    return;
   }
+
+  if (!seriesSlugForChapter.trim()) {
+    toast.error("Pilih Series tujuan.");
+    return;
+  }
+
+  if (chapterMode === "comic" && chImages.length === 0) {
+    toast.error("Masukkan minimal 1 URL gambar.");
+    return;
+  }
+
+  if (chapterMode === "novel" && !chText.trim()) {
+    toast.error("Teks novel tidak boleh kosong.");
+    return;
+  }
+
+  if (!chapterOnly) {
+    toast.error("Data chapter tidak valid.");
+    return;
+  }
+
+  // Ambil lock SEBELUM menjalankan request.
+  chapterSubmitLock.current = true;
+  setBusy(true);
+
+  try {
+    const targetSlug = seriesSlugForChapter.trim();
+    const targetBucket = bucket;
+    const chapterNumber = Number(chapterOnly.number);
+
+    const out = await createOrUpdateChapter(
+      targetSlug,
+      chapterOnly,
+      targetBucket
+    );
+
+    const uploadedNo =
+      out?.chapter?.number ?? chapterNumber;
+
+    toast.success(`Chapter ${uploadedNo} berhasil disimpan!`);
+
+    setSuccessInfo({
+      title: `Chapter [${uploadedNo}] berhasil diupload ke '${targetSlug}'`,
+    });
+    setSuccessOpen(true);
+
+    setChTitle("");
+    setChNo(String((Number(uploadedNo) || 1) + 1));
+
+    if (chapterMode === "comic") {
+      setChImagesRaw("");
+      setChCover("");
+      setChAutoCover(true);
+    } else {
+      setChText("");
+    }
+
+    await refreshChaptersFor(targetSlug);
+  } catch (e) {
+    toast.error(e.message || "Gagal kirim chapter");
+  } finally {
+    chapterSubmitLock.current = false;
+    setBusy(false);
+  }
+}
 
 
 
