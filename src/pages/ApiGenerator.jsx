@@ -560,66 +560,62 @@ const [editSearchOpen, setEditSearchOpen] = useState(false);
 
 
   const chapterOnly = useMemo(() => {
+  const idBase = seriesSlugForChapter.trim();
+  const number = Number(chNo) || 1;
+  if (!idBase) return null;
 
-    const idBase = seriesSlugForChapter.trim();
+  const publishedAt = chDate
+    ? new Date(chDate).toISOString()
+    : new Date().toISOString();
 
-    const number = Number(chNo) || 1;
+  // Cover bisa custom, atau otomatis memakai gambar pertama.
+  const customCover = chCover.trim();
+  const thumbnail = chAutoCover
+    ? chImages[0] || undefined
+    : customCover || chImages[0] || undefined;
 
-    if (!idBase) return null;
+  if (chapterMode === "comic" && chImages.length === 0) return null;
+  if (chapterMode === "novel" && !chText.trim()) return null;
 
+  let base = {
+    number,
+    title: chTitle?.trim() || `Chapter ${number}`,
+    publishedAt,
+    thumbnail,
+  };
 
-
-    const publishedAt = chDate ? new Date(chDate).toISOString() : new Date().toISOString();
-
-    const thumbnail = chAutoCover ? chImages[0] || "" : chCover?.trim() || chImages[0] || "";
-
-
-
-    if (chapterMode === "comic" && chImages.length === 0) return null;
-
-    if (chapterMode === "novel" && !chText.trim()) return null;
-
-
-
-    let base = {
-
-      number,
-
-      title: chTitle?.trim() || `Chapter ${number}`,
-
-      publishedAt,
-
-      thumbnail: thumbnail || undefined,
-
+  if (chapterMode === "comic") {
+    base = {
+      ...base,
+      pages: chImages,
+      type: "comic",
     };
+  } else {
+    const blocks = chText
+      .split(/\n{2,}/)
+      .map((p) => p.trim())
+      .filter(Boolean);
 
+    base = {
+      ...base,
+      type: "novel",
+      content: chText,
+      content_blocks: blocks,
+    };
+  }
 
-
-    if (chapterMode === "comic") {
-
-      base = { ...base, pages: chImages, type: "comic" };
-
-    } else {
-
-      const blocks = chText
-
-        .split(/\n{2,}/)
-
-        .map((p) => p.trim())
-
-        .filter(Boolean);
-
-      base = { ...base, type: "novel", content: chText, content_blocks: blocks };
-
-    }
-
-
-
-    return base;
-
-  }, [seriesSlugForChapter, chNo, chTitle, chDate, chAutoCover, chCover, chImages, chText, chapterMode, nowIso]);
-
-
+  return base;
+}, [
+  seriesSlugForChapter,
+  chNo,
+  chTitle,
+  chDate,
+  chAutoCover,
+  chCover,
+  chImages,
+  chText,
+  chapterMode,
+]);
 
   /* Fetch API */
 
@@ -2217,6 +2213,53 @@ const [editSearchOpen, setEditSearchOpen] = useState(false);
                           />
 
                           Jadikan gambar ke-1 sebagai cover
+
+<Field
+  label="Cover Chapter Custom (Opsional)"
+  hint="Masukkan URL gambar cover khusus. Jika mode otomatis aktif, cover mengikuti gambar pertama."
+>
+  <input
+    type="url"
+    value={chCover}
+    onChange={(e) => {
+      setChCover(e.target.value);
+      setChAutoCover(false);
+    }}
+    placeholder="https://example.com/cover-chapter.jpg"
+    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm focus:border-violet-500 focus:outline-none"
+  />
+</Field>
+
+<div className="flex flex-wrap gap-2">
+  <Chip
+    active={chAutoCover}
+    onClick={() => setChAutoCover(true)}
+  >
+    Otomatis (gambar pertama)
+  </Chip>
+
+  <Chip
+    active={!chAutoCover}
+    onClick={() => setChAutoCover(false)}
+  >
+    Gunakan cover custom
+  </Chip>
+</div>
+
+{(chAutoCover ? chImages[0] : chCover.trim() || chImages[0]) && (
+  <div className="mt-3">
+    <span className="text-[11px] text-zinc-500 mb-1.5 block">
+      Preview Cover Chapter
+    </span>
+    <div className="w-32 aspect-[3/4] rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden">
+      <img
+        src={chAutoCover ? chImages[0] : chCover.trim() || chImages[0]}
+        alt="Preview cover chapter"
+        className="w-full h-full object-cover"
+      />
+    </div>
+  </div>
+)}
 
                         </label>
 
