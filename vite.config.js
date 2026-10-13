@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://gv-comics-api-2.vercel.app/api', // ganti domain FE/BE yg ada /api/submit
+        target: 'https://gv-comics-api-2.vercel.app', // ganti domain FE/BE yg ada /api/submit
         changeOrigin: true,
         secure: true,
       },
