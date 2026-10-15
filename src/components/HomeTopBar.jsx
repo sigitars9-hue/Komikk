@@ -261,8 +261,8 @@ export default function HomeTopBar({ searchQuery, onSearch }) {
         <div className="h-14 flex items-center gap-4 sm:gap-6 w-full">
           <Link to="/" replace className="flex items-center gap-2">
             <img
-              src="https://i.ibb.co.com/HfHfZv4P/Logo-Text-gv-biru.png"
-              alt="Gachaverse.id"
+              src="https://i.ibb.co.com/pB8Sj8VQ/20261015-213020.png"
+              alt="Comicverse.id"
               className="h-12 sm:h-12 md:h-14 object-contain"
               loading="eager"
               decoding="async"

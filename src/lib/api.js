@@ -297,7 +297,7 @@ export async function fetchAnnouncements() {
 }
 
 /* ======================= LATEST / UPDATES ======================== */
-export async function fetchLatest(page = 1, pageSize = 20) {
+export async function fetchLatest(page = 1, pageSize = 10) {
   const qp = `?page=${page}&pageSize=${pageSize}`;
   const { data } = await tryGET([
     `/series/latest${qp}`,

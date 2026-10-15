@@ -38,6 +38,20 @@ const compact = (n) =>
     Number(n) || 0
   );
 
+/* Chapter berikutnya = nomor terbesar + 1 */
+const getNextChapterNumber = (list = []) => {
+  const nums = list.map((c) => Number(c?.number)).filter(Number.isFinite);
+  return nums.length ? Math.floor(Math.max(...nums)) + 1 : 1;
+};
+
+/* Waktu lokal untuk input datetime-local */
+const nowLocalInput = () => {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 16);
+};
+
 /* ─── Presets ─── */
 const GENRES = [
   "Action", "Adaptation", "Adult", "Adventure", "Comedy", "Cooking",
@@ -554,7 +568,7 @@ export default function AdminDashboard() {
   const [seriesSlugForChapter, setSeriesSlugForChapter] = useState("");
   const [chNo, setChNo] = useState("1");
   const [chTitle, setChTitle] = useState("");
-  const [chDate, setChDate] = useState(() => new Date().toISOString().slice(0, 16));
+  const [chDate, setChDate] = useState(() => nowLocalInput());
   const [chImagesRaw, setChImagesRaw] = useState("");
   const [chCover, setChCover] = useState("");
   const [chAutoCover, setChAutoCover] = useState(true);
@@ -682,7 +696,7 @@ export default function AdminDashboard() {
     }
   }
 
-  async function refreshChaptersFor(slugTarget) {
+  async function refreshChaptersFor(slugTarget, { autofill = false } = {}) {
     if (!slugTarget) {
       setRemoteChapters([]);
       return;
@@ -690,7 +704,18 @@ export default function AdminDashboard() {
     try {
       setChaptersLoading(true);
       const out = await getSeriesChapters(slugTarget, { page: 1, pageSize: 5000 });
-      setRemoteChapters(Array.isArray(out?.items) ? out.items : Array.isArray(out) ? out : []);
+      const items = Array.isArray(out?.items) ? out.items : Array.isArray(out) ? out : [];
+      setRemoteChapters(items);
+
+      if (autofill) {
+        setChNo(String(getNextChapterNumber(items)));
+        setChTitle("");
+        setChDate(nowLocalInput());
+        setChImagesRaw("");
+        setChCover("");
+        setChAutoCover(true);
+        setChText("");
+      }
     } catch (e) {
       toast.error(e.message || "Gagal mengambil chapter");
       setRemoteChapters([]);
@@ -699,15 +724,16 @@ export default function AdminDashboard() {
     }
   }
 
+  /* Pilih series untuk chapter: set tujuan + isi otomatis chapter berikutnya */
+  function selectSeriesForChapter(slugTarget) {
+    setSelectedSeriesSlug(slugTarget);
+    setSeriesSlugForChapter(slugTarget);
+    refreshChaptersFor(slugTarget, { autofill: true });
+  }
+
   useEffect(() => {
     refreshSeriesList();
   }, []);
-
-  useEffect(() => {
-    if (!selectedSeriesSlug) return;
-    setSeriesSlugForChapter(selectedSeriesSlug);
-    refreshChaptersFor(selectedSeriesSlug);
-  }, [selectedSeriesSlug]);
 
   const filteredSeries = useMemo(() => {
     const q = seriesQuery.trim().toLowerCase();
@@ -896,6 +922,7 @@ export default function AdminDashboard() {
       });
       setSuccessOpen(true);
 
+      /* Cadangan jika refresh gagal */
       setChTitle("");
       setChNo(String((Number(uploadedNo) || 1) + 1));
 
@@ -907,7 +934,7 @@ export default function AdminDashboard() {
         setChText("");
       }
 
-      await refreshChaptersFor(targetSlug);
+      await refreshChaptersFor(targetSlug, { autofill: true });
     } catch (e) {
       toast.error(e.message || "Gagal kirim chapter");
     } finally {
@@ -992,6 +1019,8 @@ export default function AdminDashboard() {
 
   const chapterCoverPreview = chAutoCover ? chImages[0] : chCover.trim() || chImages[0];
 
+  const lastChapterNo = remoteChapters.length ? getNextChapterNumber(remoteChapters) - 1 : 0;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 antialiased selection:bg-violet-600 selection:text-white">
       {/* ─── Backdrop Dropdown (Mobile) ─── */}
@@ -1048,53 +1077,53 @@ export default function AdminDashboard() {
       <div className="lg:pl-64 min-h-screen flex flex-col">
         {/* Top bar Header */}
         <header className="sticky top-0 z-50 h-16 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-md px-3 sm:px-6 lg:px-8 flex items-center justify-between gap-2 sm:gap-3">
-         <div className="flex items-center min-w-0">
-  {/* Desktop: Label Judul Tetap Statis */}
-  <h2 className="hidden lg:block text-lg font-bold tracking-tight truncate">
-    {activeLabel}
-  </h2>
+          <div className="flex items-center min-w-0">
+            {/* Desktop: Label Judul Tetap Statis */}
+            <h2 className="hidden lg:block text-lg font-bold tracking-tight truncate">
+              {activeLabel}
+            </h2>
 
-  {/* Mobile: Tombol Dropdown Dashboard rata kiri */}
-  <div className="relative lg:hidden">
-    <button
-      type="button"
-      onClick={() => setMenuDropdownOpen(!menuDropdownOpen)}
-      className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 hover:border-violet-500/50 focus:outline-none transition active:scale-95"
-    >
-      <Icon name={activeIcon} className="w-4 h-4 text-violet-400 shrink-0" />
-      <span className="text-xs font-semibold">{activeLabel}</span>
-      <Icon
-        name="chevronDown"
-        className={`w-3.5 h-3.5 text-slate-400 transition-transform ${
-          menuDropdownOpen ? "rotate-180" : ""
-        }`}
-      />
-    </button>
+            {/* Mobile: Tombol Dropdown Dashboard rata kiri */}
+            <div className="relative lg:hidden">
+              <button
+                type="button"
+                onClick={() => setMenuDropdownOpen(!menuDropdownOpen)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 hover:border-violet-500/50 focus:outline-none transition active:scale-95"
+              >
+                <Icon name={activeIcon} className="w-4 h-4 text-violet-400 shrink-0" />
+                <span className="text-xs font-semibold">{activeLabel}</span>
+                <Icon
+                  name="chevronDown"
+                  className={`w-3.5 h-3.5 text-slate-400 transition-transform ${
+                    menuDropdownOpen ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
 
-    {/* Menu Popup */}
-    {menuDropdownOpen && (
-      <div className="absolute top-full left-0 mt-2 w-48 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl p-1.5 z-50">
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => {
-              setActiveTab(item.id);
-              setMenuDropdownOpen(false);
-            }}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition text-left ${
-              activeTab === item.id
-                ? "bg-violet-600/20 text-violet-300 font-semibold"
-                : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"
-            }`}
-          >
-            <Icon name={item.icon} className="w-4 h-4" />
-            {item.label}
-          </button>
-        ))}
-      </div>
-    )}
-  </div>
-</div>
+              {/* Menu Popup */}
+              {menuDropdownOpen && (
+                <div className="absolute top-full left-0 mt-2 w-48 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl p-1.5 z-50">
+                  {navItems.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        setActiveTab(item.id);
+                        setMenuDropdownOpen(false);
+                      }}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition text-left ${
+                        activeTab === item.id
+                          ? "bg-violet-600/20 text-violet-300 font-semibold"
+                          : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                      }`}
+                    >
+                      <Icon name={item.icon} className="w-4 h-4" />
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* Database Selector */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
@@ -1237,7 +1266,7 @@ export default function AdminDashboard() {
                           </span>
                           <button
                             onClick={() => {
-                              setSelectedSeriesSlug(item.slug);
+                              selectSeriesForChapter(item.slug);
                               setActiveTab("chapter");
                             }}
                             className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-violet-600/20 text-violet-300 text-[11px] font-medium border border-violet-500/25 hover:bg-violet-600/30 transition"
@@ -1516,8 +1545,7 @@ export default function AdminDashboard() {
                         thumb="h-14 w-10"
                         maxH="max-h-64"
                         onPick={(series) => {
-                          setSelectedSeriesSlug(series.slug);
-                          setSeriesSlugForChapter(series.slug);
+                          selectSeriesForChapter(series.slug);
                           setSeriesQuery("");
                           setEditSearchOpen(false);
                         }}
@@ -1533,7 +1561,18 @@ export default function AdminDashboard() {
                 {/* Chapter Meta */}
                 <Card title="Detail Chapter">
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <Field label="Nomor Chapter">
+                    <Field
+                      label="Nomor Chapter"
+                      hint={
+                        chaptersLoading
+                          ? "Memuat daftar chapter…"
+                          : remoteChapters.length
+                          ? `Chapter terakhir: ${lastChapterNo}. Terisi otomatis, tetap bisa diubah.`
+                          : seriesSlugForChapter
+                          ? "Belum ada chapter, dimulai dari 1."
+                          : undefined
+                      }
+                    >
                       <input
                         value={chNo}
                         onChange={(e) => setChNo(e.target.value.replace(/[^\d]/g, ""))}
@@ -1685,7 +1724,7 @@ export default function AdminDashboard() {
 
                 <div className="sticky bottom-4 z-20">
                   <button
-                    disabled={busy}
+                    disabled={busy || chaptersLoading}
                     onClick={onSendChapter}
                     className="w-full py-3.5 px-6 rounded-2xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-sm shadow-xl shadow-black/40 transition-all active:scale-[0.99] disabled:opacity-50"
                   >
