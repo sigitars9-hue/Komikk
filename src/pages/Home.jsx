@@ -157,7 +157,6 @@ function MCRecommendationSection() {
   const isMobile = useIsMobile();
   const limit = isMobile ? 3 : 6;
 
-  
 useEffect(() => {
   let alive = true;
 
@@ -167,32 +166,33 @@ useEffect(() => {
     setItems([]);
 
     try {
-      const { data } = await import('axios').then(({ default: axios }) =>
-        axios.get(
-          `${(import.meta.env?.VITE_API_BASE || 'https://gv-comics-api-2.vercel.app').replace(/\/+$/, '')}/series/latest`,
-          { params: { page: 1, pageSize: 2000 } }
-        )
-      );
+      // Gunakan fungsi API yang sudah dipakai bagian Home lainnya.
+      const series = await fetchLatest(1, 2000);
 
       if (!alive) return;
-
-      const series = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.items)
-          ? data.items
-          : [];
 
       const target = tab.trim().toLowerCase();
 
       const filtered = series.filter((item) => {
-        const genres = Array.isArray(item.genres) ? item.genres : [];
-        const tags = Array.isArray(item.tags) ? item.tags : [];
+        const genres = Array.isArray(item?.genres)
+          ? item.genres
+          : [];
 
-        const labels = [...genres, ...tags].map((value) =>
-          String(typeof value === 'object' ? value?.name ?? '' : value)
-            .trim()
-            .toLowerCase()
-        );
+        const tags = Array.isArray(item?.tags)
+          ? item.tags
+          : [];
+
+        const labels = [...genres, ...tags]
+          .map((value) => {
+            if (typeof value === 'object' && value !== null) {
+              return String(
+                value.name ?? value.slug ?? value.title ?? ''
+              ).trim().toLowerCase();
+            }
+
+            return String(value ?? '').trim().toLowerCase();
+          })
+          .filter(Boolean);
 
         return labels.includes(target);
       });
@@ -205,7 +205,9 @@ useEffect(() => {
         setError('Gagal memuat rekomendasi. Silakan coba lagi.');
       }
     } finally {
-      if (alive) setLoading(false);
+      if (alive) {
+        setLoading(false);
+      }
     }
   }
 
@@ -215,6 +217,7 @@ useEffect(() => {
     alive = false;
   };
 }, [tab]);
+
 
   return (
     <section className="space-y-4">
