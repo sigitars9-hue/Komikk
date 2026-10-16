@@ -221,12 +221,12 @@ useEffect(() => {
 
   return (
     <section className="space-y-4">
-      <SectionHeader title="Rekomendasi Pembaca" />
+      <SectionHeader title="Berdasarkan MC" />
 
       <div className="flex flex-wrap gap-2">
         {[
-          { key: 'Male MC', label: 'Pembaca Cowok' },
-          { key: 'Female MC', label: 'Pembaca Cewek' },
+          { key: 'Male MC', label: 'Male Corner' },
+          { key: 'Female MC', label: 'Female Corner' },
         ].map((option) => (
           <button
             key={option.key}
@@ -408,31 +408,39 @@ export default function Home() {
       ) : (
         /* JIKA TIDAK SEDANG SEARCH: TAMPILKAN KONTEN DEFAULT */
         <>
-          {/* Hero: Slider + Pengumuman */}
-          <div className="grid lg:grid-cols-[minmax(0,1fr)_420px] gap-6 items-start">
-            <div className="rounded-xl overflow-hidden ring-1 ring-white/10 shadow-[0_10px_30px_rgba(0,0,0,.25)]">
-              <Slider />
-            </div>
+{/* Hero: Slider + Pengumuman + Ads */}
+<div className="grid lg:grid-cols-[minmax(0,1fr)_420px] gap-6 items-start">
+  {/* Slider */}
+  <div className="rounded-xl overflow-hidden ring-1 ring-white/10 shadow-[0_10px_30px_rgba(0,0,0,.25)]">
+    <Slider />
+  </div>
 
-            <div className="space-y-3">
-              <div className="flex items-baseline justify-between px-1">
-                <h2 className="text-2xl font-extrabold">Pengumuman</h2>
-                <Link to="/announcements" className="text-sm text-zinc-400 hover:text-white">
-                  Semua
-                </Link>
-              </div>
+  {/* Kolom kanan: Pengumuman dan Iklan */}
+  <div className="space-y-4">
+    {/* Pengumuman */}
+    <div className="space-y-3">
+      <div className="flex items-baseline justify-between px-1">
+        <h2 className="text-2xl font-extrabold">Pengumuman</h2>
+        <Link
+          to="/announcements"
+          className="text-sm text-zinc-400 hover:text-white"
+        >
+          Semua
+        </Link>
+      </div>
 
-              <div className="rounded-xl ring-1 ring-white/10 bg-zinc-900/60 p-4">
-                <AnnouncementTeaser limit={1} />
-              </div>
-            </div>
-          </div>
+      <div className="rounded-xl ring-1 ring-white/10 bg-zinc-900/60 p-4">
+        <AnnouncementTeaser limit={3} />
+      </div>
+    </div>
+    </div>
+  </div>
 
           {/* Iklan sejajar */}
           <section className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mx-0 md:-mx-6 2xl:-mx-10">
             {[
-              { href: "", src: "", alt: "" },
-              { href: "", src: "", alt: "" },
+              { href: "https://chat.whatsapp.com/LK2sFu9ThYCIsNTD1RoF2R", src: "/ads/jokiexplore.jpeg", alt: "Gabung Grup WhatsApp" },
+              { href: "https://chat.whatsapp.com/LK2sFu9ThYCIsNTD1RoF2R", src: "/ads/jokipulangin.jpeg", alt: "Gabung Grup WhatsApp" },
             ].map((ad, i) => (
               <a
                 key={i}

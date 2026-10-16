@@ -1,0 +1,142 @@
+
+/* ======================== EXPLORE THEME ======================== */
+
+.explore-theme {
+  --explore-accent: #2563eb;
+  --explore-dark: #1d4ed8;
+  --explore-light: #60a5fa;
+  --explore-ring: #3b82f6;
+}
+
+/* ======================== CATEGORY TABS ======================== */
+
+.explore-corner-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #d4d4d8;
+}
+
+.explore-corner-tab:hover:not(.explore-corner-tab-active) {
+  background: rgb(255 255 255 / 5%);
+}
+
+.explore-corner-tab-active {
+  color: white;
+  background: linear-gradient(
+    110deg,
+    var(--explore-dark),
+    var(--explore-accent),
+    var(--explore-light)
+  );
+  border-color: var(--explore-ring);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
+}
+
+/* ======================== GRID / LIST ======================== */
+
+.explore-view-btn {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #09090B;
+  color: #e4e4e7;
+  font-size: 13px;
+  font-weight: 500;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.explore-view-btn:hover {
+  background: #3f3f46;
+}
+
+.explore-view-btn-active {
+  background: linear-gradient(
+    110deg,
+    var(--explore-dark),
+    var(--explore-accent),
+    var(--explore-light)
+  );
+  color: white;
+}
+
+/* ======================== GENRE FILTER ======================== */
+
+.explore-genre-chip {
+  padding: 6px 11px;
+  border-radius: 10px;
+  background: #27272a;
+  color: #e4e4e7;
+  font-size: 13px;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.explore-genre-chip:hover {
+  background: #3f3f46;
+}
+
+.explore-genre-chip-active {
+  background: linear-gradient(
+    110deg,
+    var(--explore-dark),
+    var(--explore-accent),
+    var(--explore-light)
+  );
+  color: white;
+}
+
+/* ======================== SWIPER ======================== */
+
+.explore-theme .swiper-button-next,
+.explore-theme .swiper-button-prev {
+  color: var(--explore-light);
+}
+
+.explore-theme .swiper-pagination-bullet {
+  background: white;
+  opacity: 0.55;
+}
+
+.explore-theme .swiper-pagination-bullet-active {
+  background: var(--explore-accent);
+  opacity: 1;
+}
+
+/* ======================== LINKS & ACCENTS ======================== */
+
+.explore-theme .text-brand {
+  color: var(--explore-accent);
+}
+
+.explore-theme .bg-brand {
+  background-color: var(--explore-accent);
+}
+
+.explore-theme .ring-brand\/30 {
+  --tw-ring-color: var(--explore-ring);
+}
+
+.explore-theme .shadow-brand\/20 {
+  --tw-shadow-color: var(--explore-accent);
+}
+
+/* ======================== MOBILE ======================== */
+
+@media (max-width: 640px) {
+  .explore-corner-tab {
+    padding: 9px 13px;
+    font-size: 12px;
+  }
+
+  .explore-view-btn {
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+
+  .explore-genre-chip {
+    padding: 6px 9px;
+    font-size: 12px;
+  }
+}
