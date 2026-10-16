@@ -55,13 +55,13 @@ const nowLocalInput = () => {
 /* ─── Presets ─── */
 const GENRES = [
   "Action", "Adaptation", "Adult", "Adventure", "Comedy", "Cooking",
-  "Crime", "Demon", "Demons", "Drama", "Ecchi", "Fantasy", "Fight",
+  "Crime", "Demon", "Drama", "Ecchi", "Fantasy", "Fight",
   "Game", "Gender Bender", "Harem", "Historical", "Horror", "Isekai",
-  "Latest", "Magic", "Martial Arts", "Mature", "Mecha", "Medical",
+  "Latest", "Magic", "Martial Arts", "Mecha", "Medical",
   "Murim", "Mystery", "Philosophical", "Psychological", "Regression",
   "Revenge", "Romance", "School Life", "Sci-fi", "Seinen", "Shoujo",
-  "Shounen", "Slice of Life", "Smut", "Sports", "Supernatural",
-  "Supranatural", "Thriller", "Tragedy", "Violence", "Wuxia",
+  "Shounen", "Slice of Life", "Sports", "Supernatural",
+  "Super Power", "Thriller", "Tragedy", "Violence", "Wuxia", "Male MC", "Female MC", "Reincarnation"
 ];
 const TYPES = ["Manga", "Manhwa", "Manhua"];
 const FORMATS = ["Webtoon", "Comic", "Light Novel"];

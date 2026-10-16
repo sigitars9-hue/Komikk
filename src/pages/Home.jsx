@@ -1,5 +1,4 @@
 // src/pages/Home.jsx
-import { sortByViews, sortByRating } from '../lib/rank';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Slider from '../components/Slider';
@@ -77,14 +76,14 @@ function PopularSection() {
   const limit = isMobile ? 3 : 6;
 
   useEffect(() => {
-  let alive = true;
-  setLoading(true); setError('');
-  fetchPopular(tab)
-    .then(r => alive && setItems(sortByViews(Array.isArray(r) ? r : [], tab)))
-    .catch(() => alive && setError('Gagal memuat populer.'))
-    .finally(() => alive && setLoading(false));
-  return () => { alive = false; };
-}, [tab]);
+    let alive = true;
+    setLoading(true); setError('');
+    fetchPopular(tab)
+      .then(r => alive && setItems(Array.isArray(r) ? r : []))
+      .catch(() => alive && setError('Gagal memuat populer.'))
+      .finally(() => alive && setLoading(false));
+    return () => { alive = false; };
+  }, [tab]);
 
   return (
     <section className="space-y-4">
@@ -128,12 +127,16 @@ function PopularSection() {
       {error && <div className="text-rose-400">{error}</div>}
 
       {!loading && !error && (
-  <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-    {items.slice(0, limit).map((it, idx) => (
-      <CardPopular key={it.slug || idx} item={it} rank={idx + 1} period={tab} />
-    ))}
-  </div>
-)}
+        <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+          {items.slice(0, limit).map((it, idx) => (
+            <CardPopular
+              key={it.slug || idx}
+              item={it}
+              className="rounded-lg"
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -197,14 +200,14 @@ export default function Home() {
   }, [page]);
 
   /* Recommendations */
-useEffect(() => {
-  let live = true;
-  setLoadReco(true);
-  fetchRecommendations(tab)
-    .then(r => live && setReco(sortByRating(Array.isArray(r) ? r : [])))
-    .finally(() => live && setLoadReco(false));
-  return () => { live = false; };
-}, [tab]);
+  useEffect(() => {
+    let live = true;
+    setLoadReco(true);
+    fetchRecommendations(tab)
+      .then(r => live && setReco(Array.isArray(r) ? r : []))
+      .finally(() => live && setLoadReco(false));
+    return () => { live = false; };
+  }, [tab]);
 
   const isSearchActive = searchQuery.trim().length >= 3;
 
