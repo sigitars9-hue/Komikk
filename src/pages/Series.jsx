@@ -158,12 +158,44 @@ export default function Series() {
   const { slug } = useParams();
   const nav = useNavigate();
 
+
+
   // data
   const [detail, setDetail] = useState(null);
   const [chapters, setChapters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [readChapters, setReadChapters] = useState({});
+  
+  const isFemaleMC = useMemo(() => {
+  if (!detail) return false;
 
+  const values = [
+    ...(Array.isArray(detail.genres) ? detail.genres : []),
+    ...(Array.isArray(detail.tags) ? detail.tags : []),
+  ].map((value) => String(value).trim().toLowerCase());
+
+  // Female MC menggunakan aksen magenta.
+  // Selain itu, gunakan warna biru seperti sebelumnya.
+  return values.some((value) =>
+    ["female mc", "female protagonist", "female lead"].includes(value)
+  );
+}, [detail]);
+
+const accent = isFemaleMC
+  ? {
+      button: "from-fuchsia-700 via-fuchsia-500 to-pink-400",
+      icon: "text-fuchsia-400",
+      text: "text-fuchsia-400",
+      focus: "focus:ring-fuchsia-500",
+      hover: "hover:text-fuchsia-400",
+    }
+  : {
+      button: "from-brand-dark via-brand to-brand-light",
+      icon: "text-blue-400",
+      text: "text-brand",
+      focus: "focus:ring-brand",
+      hover: "hover:text-brand",
+    };
   // state tombol
   const [inBookmark, setInBookmark] = useState(false);
   const [inFav, setInFav] = useState(false);
@@ -478,16 +510,16 @@ return (
             {detail.stats?.rating ?? '—'}
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <Bookmark className="w-4 h-4 text-sky-400" />
+          <Bookmark className={`w-4 h-4 ${accent.icon}`} />
             {formatCount(detail.stats?.bookmarks)}
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <Eye className="w-4 h-4 text-blue-400" />
+            <Eye className={`w-4 h-4 ${accent.icon}`} />
             {formatCount(detail.stats?.views)}
           </span>
           {detail.stats?.score && (
             <span className="inline-flex items-center gap-1.5">
-              <Award className="w-4 h-4 text-brand" />
+              <Award className={`w-4 h-4 ${accent.text}`} />
               {detail.stats.score}
             </span>
           )}
@@ -499,9 +531,10 @@ return (
             <button
               onClick={handleReadFirst}
               disabled={!latestChapter || busy}
-              className="w-full inline-flex items-center justify-center gap-2 px-5 py-2.5
-                         rounded-xl font-semibold bg-gradient-to-r from-brand-dark via-brand to-brand-light
-                         text-white hover:brightness-110 disabled:opacity-60"
+              className={`w-full inline-flex items-center justify-center gap-2 px-5 py-2.5
+              rounded-xl font-semibold bg-gradient-to-r ${accent.button}
+              text-white hover:brightness-110 disabled:opacity-60`}
+
             >
               <Play className="w-5 h-5" />
               Baca
@@ -583,7 +616,7 @@ return (
               </p>
               <button
                 onClick={() => setExpandDesc((v) => !v)}
-                className="mt-2 text-sm text-brand hover:underline"
+                className={`mt-2 text-sm ${accent.text} hover:underline`}
               >
                 {expandDesc ? 'Read Less' : 'Read More'}
               </button>
@@ -606,8 +639,8 @@ return (
                     value={chapterQuery}
                     onChange={(e) => setChapterQuery(e.target.value)}
                     placeholder="Cari Chapter, contoh: 69 atau 76"
-                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-zinc-900/70 ring-1 ring-white/10
-                               text-sm placeholder:text-zinc-500 focus:outline-none focus:ring-brand"
+                    className={`w-full pl-9 pr-3 py-2 rounded-xl bg-zinc-900/70 ring-1 ring-white/10
+                    text-sm placeholder:text-zinc-500 focus:outline-none ${accent.focus}`}
                   />
                 </div>
 

@@ -262,6 +262,7 @@ function normalizeSeries(raw) {
   };
 }
 
+
 function mapItem(it, idx = 0) {
   return {
     id: it.id || it.slug || String(idx + 1),
@@ -270,8 +271,13 @@ function mapItem(it, idx = 0) {
     cover: it.cover || it.thumbnail || it.image || it.thumb || "",
     updatedAt: it.updatedAt || it.date || it.released || null,
     badge: it.badge || it.type || "UP",
+
+    // Jangan hilangkan genre dan tag dari respons API
+    genres: Array.isArray(it.genres) ? it.genres : [],
+    tags: Array.isArray(it.tags) ? it.tags : [],
   };
 }
+
 
 /* ========================= HOME / SLIDER ========================= */
 export async function fetchHome() {

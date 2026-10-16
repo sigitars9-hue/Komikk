@@ -533,7 +533,7 @@ export default function AdminDashboard() {
   const [busy, setBusy] = useState(false);
   const chapterSubmitLock = useRef(false);
   const [bucket, setBucket] = useState("data1");
-
+  const [showLocationConfirm, setShowLocationConfirm] = useState(false);
   /* Remote Data State */
   const [remoteSeries, setRemoteSeries] = useState([]);
   const [remoteLoading, setRemoteLoading] = useState(false);
@@ -1495,18 +1495,19 @@ export default function AdminDashboard() {
 
                 {/* Submit Action */}
                 <div className="sticky bottom-4 z-20">
-                  <button
-                    disabled={busy}
-                    onClick={onSendSeries}
-                    className="w-full py-3.5 px-6 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-xl shadow-black/40 transition-all active:scale-[0.99] disabled:opacity-50"
-                  >
-                    {busy
-                      ? "Sedang Menyimpan…"
-                      : editingSlug
-                      ? `Simpan Perubahan Komik (${bucket})`
-                      : `Publikasikan Komik Baru (${bucket})`}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setShowLocationConfirm(true)}
+                  className="w-full py-3.5 px-6 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-xl shadow-black/40 transition-all active:scale-[0.99] disabled:opacity-50"
+                >
+                {busy
+                  ? "Sedang Menyimpan…"
+                  : editingSlug
+                  ? `Simpan Perubahan Komik (${bucket})`
+                  : `Publikasikan Komik Baru (${bucket})`}
+                </button>
+              </div>
               </div>
 
               {/* Live JSON Preview */}
@@ -1897,6 +1898,70 @@ export default function AdminDashboard() {
       >
         <p className="text-slate-300">{successInfo.title}</p>
       </Modal>
+      
+{/* Popup Konfirmasi Lokasi Penyimpanan */}
+<Modal
+  open={showLocationConfirm}
+  onClose={() => {
+    if (!busy) setShowLocationConfirm(false);
+  }}
+  title="Konfirmasi Lokasi Data"
+  primaryText={busy ? "Menyimpan..." : "Ya, Lanjutkan"}
+  onPrimary={async () => {
+    if (busy) return;
+
+    // Validasi sebelum mengirim data
+    if (!ADMIN_TOKEN) {
+      toast.error("VITE_ADMIN_TOKEN belum diset.");
+      return;
+    }
+
+    if (seriesInvalid) {
+      toast.error(
+        "Lengkapi judul, slug, sinopsis, cover, dan minimal 1 genre."
+      );
+      return;
+    }
+
+    // onSendSeries menangani error dan menampilkan toast sendiri.
+    // Popup ditutup setelah penyimpanan berhasil.
+    const saved = await onSendSeries();
+
+    if (saved) {
+      setShowLocationConfirm(false);
+    }
+  }}
+>
+  <div className="space-y-3">
+    <p>Pastikan tujuan penyimpanan komik sudah benar.</p>
+
+    <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
+      <p className="text-xs text-slate-400">Bucket tujuan</p>
+      <p className="mt-1 text-xl font-bold text-emerald-400">
+        {bucket.toUpperCase()}
+      </p>
+
+      <p className="mt-3 text-xs text-slate-400">Judul komik</p>
+      <p className="font-semibold text-slate-100">
+        {title || "Belum diisi"}
+      </p>
+
+      <p className="mt-3 text-xs text-slate-400">Slug</p>
+      <p className="break-all font-mono text-slate-200">
+        {slug || "Belum diisi"}
+      </p>
+
+      <p className="mt-3 text-xs text-slate-400">Mode</p>
+      <p className="text-slate-200">
+        {editingSlug ? "Simpan perubahan" : "Publikasikan komik baru"}
+      </p>
     </div>
+
+    <p className="text-amber-300">
+      Periksa kembali bucket tujuan sebelum mengirim data ke API.
+    </p>
+  </div>
+</Modal>
+</div>
   );
 }

@@ -7,7 +7,13 @@ import CardPopular from '../components/CardPopular';
 import SectionHeader from '../components/SectionHeader';
 import Pagination from '../components/Pagination';
 import HomeTopBar from '../components/HomeTopBar';
-import { fetchLatest, fetchRecommendations, fetchPopular, fetchSearch } from '../lib/api';
+import {
+  fetchLatest,
+  fetchRecommendations,
+  fetchPopular,
+  fetchSearch,
+  fetchByGenre,
+} from '../lib/api';
 import { ANNOUNCEMENTS } from '../data/announcements';
 
 /* Hook sederhana cek mobile */
@@ -135,6 +141,142 @@ function PopularSection() {
               className="rounded-lg"
             />
           ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ======= REKOMENDASI MALE MC & FEMALE MC ======= */
+function MCRecommendationSection() {
+  const [tab, setTab] = useState('Male MC');
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const isMobile = useIsMobile();
+  const limit = isMobile ? 3 : 6;
+
+  
+useEffect(() => {
+  let alive = true;
+
+  async function loadMCRecommendations() {
+    setLoading(true);
+    setError('');
+    setItems([]);
+
+    try {
+      const { data } = await import('axios').then(({ default: axios }) =>
+        axios.get(
+          `${(import.meta.env?.VITE_API_BASE || 'https://gv-comics-api-2.vercel.app').replace(/\/+$/, '')}/series/latest`,
+          { params: { page: 1, pageSize: 2000 } }
+        )
+      );
+
+      if (!alive) return;
+
+      const series = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.items)
+          ? data.items
+          : [];
+
+      const target = tab.trim().toLowerCase();
+
+      const filtered = series.filter((item) => {
+        const genres = Array.isArray(item.genres) ? item.genres : [];
+        const tags = Array.isArray(item.tags) ? item.tags : [];
+
+        const labels = [...genres, ...tags].map((value) =>
+          String(typeof value === 'object' ? value?.name ?? '' : value)
+            .trim()
+            .toLowerCase()
+        );
+
+        return labels.includes(target);
+      });
+
+      setItems(filtered);
+    } catch (err) {
+      console.error('Gagal memuat rekomendasi MC:', err);
+
+      if (alive) {
+        setError('Gagal memuat rekomendasi. Silakan coba lagi.');
+      }
+    } finally {
+      if (alive) setLoading(false);
+    }
+  }
+
+  loadMCRecommendations();
+
+  return () => {
+    alive = false;
+  };
+}, [tab]);
+
+  return (
+    <section className="space-y-4">
+      <SectionHeader title="Rekomendasi Pembaca" />
+
+      <div className="flex flex-wrap gap-2">
+        {[
+          { key: 'Male MC', label: 'Pembaca Cowok' },
+          { key: 'Female MC', label: 'Pembaca Cewek' },
+        ].map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            onClick={() => setTab(option.key)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium
+              transition ring-1 ${
+                tab === option.key
+                  ? option.key === 'Male MC'
+                    ? 'bg-blue-600 text-white ring-blue-500/40'
+                    : 'bg-fuchsia-600 text-white ring-fuchsia-500/40'
+                  : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200 ring-white/10'
+              }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      {loading && (
+        <div className="grid grid-cols-3 md:grid-cols-6 gap-3 animate-pulse">
+          {Array.from({ length: limit }).map((_, i) => (
+            <div
+              key={i}
+              className="rounded-lg bg-zinc-900/80 ring-1 ring-white/10 overflow-hidden"
+            >
+              <div className="aspect-[130/200] bg-zinc-800/80" />
+              <div className="p-2">
+                <div className="h-3 bg-zinc-800/70 rounded w-4/5" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {error && <div className="text-rose-400">{error}</div>}
+
+      {!loading && !error && items.length > 0 && (
+        <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+          {items.slice(0, limit).map((item, index) => (
+            <Card
+              key={item.id || item.slug || index}
+              item={item}
+              hideTitle
+              className="rounded-lg"
+            />
+          ))}
+        </div>
+      )}
+
+      {!loading && !error && items.length === 0 && (
+        <div className="text-zinc-400">
+          Belum ada komik dengan genre {tab}.
         </div>
       )}
     </section>
@@ -305,6 +447,8 @@ export default function Home() {
               </a>
             ))}
           </section>
+          {/* Rekomendasi khusus Male MC dan Female MC */}
+          <MCRecommendationSection />
 
           {/* Rekomendasi */}
           <section className="space-y-4">
