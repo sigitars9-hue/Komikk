@@ -63,6 +63,25 @@ const THEME = {
   },
 };
 
+// Warna tab per corner (class ditulis lengkap agar terbaca Tailwind)
+const CORNER_TAB = {
+  all: {
+    text: 'text-blue-400',
+    bar: 'bg-blue-500',
+    glow: 'from-blue-500/15',
+  },
+  male: {
+    text: 'text-indigo-400',
+    bar: 'bg-indigo-500',
+    glow: 'from-indigo-500/15',
+  },
+  female: {
+    text: 'text-fuchsia-400',
+    bar: 'bg-fuchsia-500',
+    glow: 'from-fuchsia-500/15',
+  },
+};
+
 const normalizeText = (value) =>
   String(value ?? '').trim().toLowerCase();
 
@@ -188,7 +207,7 @@ const WRAP =
 function ExploreToolbar({
   query,
   onQuery,
-  placeholder = 'Cari di Explore鈥�',
+  placeholder = 'Cari di Explore',
   openFilter,
   onToggleFilter,
   activeGenre = '',
@@ -543,19 +562,15 @@ export default function Explore() {
       </div>
 
       {/* THREE CATEGORY TABS */}
-      <div className="flex justify-center px-3 sm:px-4">
+      <div className="mx-auto w-full max-w-2xl px-3 sm:px-4">
         <div
-          className="
-            inline-flex max-w-full items-center gap-0.5 sm:gap-2
-            rounded-[10px] sm:rounded-[16px]
-            border sm:border-[3px] border-[#625b69]
-            bg-[#09090B] p-1 sm:p-2
-          "
+          className="grid grid-cols-3 border-b border-white/10"
           role="tablist"
           aria-label="Kategori Explore"
         >
           {CORNERS.map((item) => {
             const selected = corner === item.key;
+            const style = CORNER_TAB[item.key];
 
             return (
               <button
@@ -565,23 +580,26 @@ export default function Explore() {
                 aria-selected={selected}
                 onClick={() => selectCorner(item.key)}
                 className={`
-                  shrink-0 whitespace-nowrap rounded-md sm:rounded-[8px]
-                  px-2 py-1.5
-                  sm:px-5 sm:py-3
-                  text-xs sm:text-base font-semibold
-                  transition-all duration-200
+                  relative whitespace-nowrap py-3.5 sm:py-4
+                  text-[13px] sm:text-base font-semibold
+                  transition-colors duration-200
+                  focus-visible:outline focus-visible:outline-2
+                  focus-visible:outline-white
                   ${
                     selected
-                      ? item.key === 'female'
-                        ? 'bg-fuchsia-600 text-white'
-                        : item.key === 'male'
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-blue-600 text-white'
-                      : 'bg-transparent text-white hover:bg-white/10'
+                      ? `${style.text} bg-gradient-to-t ${style.glow} to-transparent`
+                      : 'text-zinc-100 hover:text-white hover:bg-white/5'
                   }
                 `}
               >
                 {item.label}
+
+                {selected && (
+                  <span
+                    className={`absolute inset-x-2 sm:inset-x-6 -bottom-px
+                                h-0.5 rounded-full ${style.bar}`}
+                  />
+                )}
               </button>
             );
           })}
@@ -996,4 +1014,4 @@ export default function Explore() {
       )}
     </div>
   );
-}
+                  }
