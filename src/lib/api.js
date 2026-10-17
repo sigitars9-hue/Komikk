@@ -448,3 +448,40 @@ export async function ping() {
     return { ok: false, error: e?.message || "Ping failed" };
   }
 }
+/* ========================= USER COMMENTS ========================= */
+function normalizeComment(c, i = 0) {
+  return {
+    id: String(c.id ?? `c-${i}`),
+    seriesSlug: c.seriesSlug || c.slug || "",
+    seriesTitle: c.seriesTitle || c.title || "",
+    seriesCover: c.seriesCover || c.cover || "",
+    chapterId: c.chapterId || null,
+    chapterNumber: c.chapterNumber ?? null,
+    text: String(c.text || c.content || ""),
+    createdAt: c.createdAt || null,
+    replies: (Array.isArray(c.replies) ? c.replies : []).map((r, j) => ({
+      id: String(r.id ?? `${c.id}-r${j}`),
+      name: r.name || r.displayName || "Pengguna",
+      avatar: r.avatar || r.photoURL || "",
+      text: String(r.text || r.content || ""),
+      createdAt: r.createdAt || null,
+    })),
+  };
+}
+
+export async function fetchUserComments(uid, token) {
+  if (!uid) return [];
+  try {
+    const { data } = await tryGET(
+      [`/users/${encodeURIComponent(uid)}/comments`],
+      { headers: token ? { Authorization: `Bearer ${token}` } : undefined }
+    );
+    const list = Array.isArray(data) ? data : data.items || [];
+    return list.map(normalizeComment);
+  } catch (e) {
+    const err = new Error("comments unavailable");
+    err.unavailable = true; // endpoint belum ada di backend (404)
+    err.cause = e;
+    throw err;
+  }
+}
