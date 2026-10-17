@@ -1,22 +1,34 @@
 // src/pages/Profile.jsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Crown,
   Gem,
-  PenSquare,
   UserRound,
   BookOpen,
+  Bookmark,
+  History,
+  MessageSquare,
+  CornerDownRight,
+  Heart,
   Flame,
-  ArrowUpRight,
+  Megaphone,
+  LogOut,
   Sparkles,
-  Plus,
+  ChevronDown,
+  RefreshCw,
 } from "lucide-react";
 import { useAuth } from "../providers/AuthProvider";
+import {
+  fetchPopular,
+  fetchAnnouncements,
+  fetchUserComments,
+} from "../lib/api";
 
-/** --- Helper: deteksi role user dari metadata / custom claims --- */
+/* =============================== ROLE =============================== */
+
 function resolveRole(user) {
   const raw =
     user?.role ||
@@ -24,117 +36,135 @@ function resolveRole(user) {
     user?.metadata?.role ||
     user?.customClaims?.role ||
     "basic";
-
   const v = String(raw).toLowerCase();
-
   if (["admin", "owner", "super"].includes(v)) return "admin";
   if (["member", "membership", "premium", "plus", "vip"].includes(v))
     return "membership";
-  if (["creator", "author", "writer"].includes(v)) return "creator";
-
-  return "basic";
+  return "basic"; // creator/author/writer ikut jadi pembaca biasa
 }
 
-/** --- Info style untuk tiap role (badge premium + efek mengkilap) --- */
-function getRoleStyle(role) {
-  switch (role) {
-    case "admin":
-      return {
-        label: "Admin",
-        desc: "Kontrol penuh panel & moderasi.",
-        icon: Crown,
-        badgeClass:
-          "from-amber-400 via-orange-500 to-rose-500 border-amber-300/80",
-        glowClass: "bg-amber-400/50",
-      };
-    case "membership":
-      return {
-        label: "Membership",
-        desc: "Akses tanpa iklan & fitur premium.",
-        icon: Gem,
-        badgeClass:
-          "from-sky-400 via-cyan-400 to-emerald-400 border-cyan-300/80",
-        glowClass: "bg-cyan-400/50",
-      };
-    case "creator":
-      return {
-        label: "Kreator",
-        desc: "Bisa upload & kelola novel sendiri.",
-        icon: PenSquare,
-        badgeClass:
-          "from-violet-400 via-fuchsia-400 to-pink-400 border-fuchsia-300/80",
-        glowClass: "bg-fuchsia-400/50",
-      };
-    default:
-      return {
-        label: "Pembaca",
-        desc: "Akun standar untuk membaca komik & novel.",
-        icon: UserRound,
-        badgeClass:
-          "from-zinc-600 via-zinc-500 to-zinc-400 border-zinc-300/80",
-        glowClass: "bg-zinc-400/40",
-      };
-  }
-}
-
-/** --- Dummy data sementara: ganti dengan API nanti --- */
-const dummyStats = {
-  manga: 24,
-  manhwa: 12,
-  manhua: 8,
-  totalSeries: 33,
-  totalChapters: 417,
-  minutes: 920,
+const ROLE_STYLE = {
+  admin: {
+    label: "Admin",
+    desc: "Kontrol penuh panel dan moderasi.",
+    icon: Crown,
+    badge: "from-amber-400 via-orange-500 to-rose-500",
+  },
+  membership: {
+    label: "Membership",
+    desc: "Bebas iklan dan akses fitur premium.",
+    icon: Gem,
+    badge: "from-sky-400 via-cyan-400 to-emerald-400",
+  },
+  basic: {
+    label: "Pembaca",
+    desc: "Akun standar untuk membaca komik dan novel.",
+    icon: UserRound,
+    badge: "from-zinc-600 via-zinc-500 to-zinc-400",
+  },
 };
 
-const dummyLeaderboard = [
-  {
-    id: "1",
-    name: "Nara Hoshizora",
-    title: "Re:Zero to Real Life Gacha",
-    views: 128_400,
-  },
-  {
-    id: "2",
-    name: "Akira Moonlight",
-    title: "Chronicles of Broken World",
-    views: 98_230,
-  },
-  {
-    id: "3",
-    name: "Velia Frost",
-    title: "Snowfall in Another Timeline",
-    views: 72_110,
-  },
-  {
-    id: "4",
-    name: "Yuuto A.",
-    title: "Shadow of Stardust",
-    views: 54_980,
-  },
-];
+/* ============================== HELPERS ============================= */
 
-function formatViews(v) {
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
-  return String(v);
+// Riwayat & bookmark disimpan lokal. Sesuaikan key kalau di app kamu beda.
+const LS_HISTORY_KEY = "gv:history";
+const LS_BOOKMARK_KEY = "gv:bookmarks";
+
+function readLocalCount(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.length;
+    if (parsed && typeof parsed === "object") return Object.keys(parsed).length;
+  } catch {
+    /* abaikan */
+  }
+  return 0;
 }
 
-export default function ProfilePage() {
-  const { user, loading, signInGoogle } = useAuth();
-  const [stats, setStats] = useState(null);
-  const [leaderboard, setLeaderboard] = useState([]);
+function timeAgo(value) {
+  const t = new Date(value).getTime();
+  if (!t) return "";
+  const diff = Math.max(0, Date.now() - t);
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "baru saja";
+  if (min < 60) return `${min} menit lalu`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} jam lalu`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day} hari lalu`;
+  const mon = Math.floor(day / 30);
+  if (mon < 12) return `${mon} bulan lalu`;
+  return `${Math.floor(mon / 12)} tahun lalu`;
+}
 
-  // sementara pakai dummy agar UI langsung hidup
-  useEffect(() => {
-    setStats(dummyStats);
-    setLeaderboard(dummyLeaderboard);
-  }, []);
+const PAGE_SIZE = 8;
+
+/* ================================ PAGE ============================== */
+
+export default function ProfilePage() {
+  const auth = useAuth();
+  const { user, loading, signInGoogle } = auth;
+  const doLogout = auth.signOut || auth.logout || null;
+
+  const [tab, setTab] = useState("ringkasan");
 
   const role = useMemo(() => resolveRole(user), [user]);
-  const roleStyle = useMemo(() => getRoleStyle(role), [role]);
-
+  const roleStyle = ROLE_STYLE[role];
   const RoleIcon = roleStyle.icon;
+
+  // ---- data dari API ----
+  const [popular, setPopular] = useState([]);
+  const [announcements, setAnnouncements] = useState([]);
+
+  const [comments, setComments] = useState([]);
+  const [cState, setCState] = useState("idle"); // idle | loading | ok | unavailable | error
+
+  const localStats = useMemo(
+    () => ({
+      history: readLocalCount(LS_HISTORY_KEY),
+      bookmarks: readLocalCount(LS_BOOKMARK_KEY),
+    }),
+    [user]
+  );
+
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    fetchPopular("weekly")
+      .then((r) => alive && setPopular(r.slice(0, 5)))
+      .catch(() => {});
+    fetchAnnouncements()
+      .then((r) => alive && setAnnouncements((r || []).slice(0, 3)))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [user]);
+
+  const loadComments = useCallback(async () => {
+    if (!user) return;
+    setCState("loading");
+    try {
+      const token = user.getIdToken ? await user.getIdToken() : null;
+      const list = await fetchUserComments(user.uid || user.id, token);
+      setComments(list);
+      setCState("ok");
+    } catch (e) {
+      // 404 = endpoint komentar belum ada di backend
+      setCState(e?.status === 404 || e?.unavailable ? "unavailable" : "error");
+    }
+  }, [user]);
+
+  useEffect(() => {
+    loadComments();
+  }, [loadComments]);
+
+  const repliesTotal = useMemo(
+    () => comments.reduce((n, c) => n + (c.replies?.length || 0), 0),
+    [comments]
+  );
 
   const handleLogin = async () => {
     if (loading) return;
@@ -145,404 +175,597 @@ export default function ProfilePage() {
     }
   };
 
-  // --- STATE: belum login ---
+  /* ---------------------------- belum login ---------------------------- */
   if (!user) {
     return (
       <div className="min-h-[100vh] bg-gradient-to-b from-[#0b1020] via-black to-black text-white -mx-4 sm:mx-0">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 pt-20 pb-10">
-          <div className="rounded-3xl bg-zinc-950/70 ring-1 ring-white/10 p-6 sm:p-8 text-center shadow-[0_24px_60px_rgba(0,0,0,0.7)]">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-brand-dark via-brand to-brand-light shadow-lg mb-4">
-              <UserRound className="w-8 h-8" />
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-              Masuk dulu yuk ✨
-            </h1>
-            <p className="mt-2 text-sm text-zinc-300">
-              Setelah login, kamu bisa lihat statistik baca, status membership,
-              dan leaderboard kreator favoritmu.
-            </p>
-            <button
-              onClick={handleLogin}
-              className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl
-                         bg-gradient-to-r from-brand-dark via-brand to-brand-light
-                         text-sm font-semibold hover:brightness-110 shadow-lg"
-            >
-              <Sparkles className="w-4 h-4" />
-              Masuk dengan Google
-            </button>
+        <div className="max-w-md mx-auto px-4 pt-24 pb-10 text-center">
+          <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-tr from-brand-dark via-brand to-brand-light grid place-items-center shadow-lg">
+            <UserRound className="w-8 h-8" />
           </div>
+          <h1 className="mt-5 text-2xl font-semibold tracking-tight">
+            Masuk untuk melihat profilmu
+          </h1>
+          <p className="mt-2 text-sm text-zinc-400 leading-relaxed">
+            Riwayat komentar, balasan dari pembaca lain, dan status akunmu
+            tersimpan di sini.
+          </p>
+          <button
+            onClick={handleLogin}
+            disabled={loading}
+            className="mt-6 inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-brand-dark via-brand to-brand-light text-sm font-semibold hover:brightness-110 disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+          >
+            <Sparkles className="w-4 h-4" />
+            Masuk dengan Google
+          </button>
         </div>
       </div>
     );
   }
 
-  // --- STATE: sudah login ---
+  /* ------------------------------ sudah login ------------------------------ */
   return (
     <div className="min-h-[100vh] bg-gradient-to-b from-[#101726] via-black to-black text-white -mx-4 sm:mx-0">
-      {/* HERO full-bleed */}
-      <section className="relative w-screen max-w-none ml-[calc(50%-50vw)] mr-[calc(50%-50vw)]">
-        {/* background color swirl */}
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_#3b82f6_0,_transparent_55%),_radial-gradient(circle_at_bottom,_#ec4899_0,_transparent_55%)] opacity-60" />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/50 to-black" />
+      {/* HEADER */}
+      <section className="relative w-screen max-w-none ml-[calc(50%-50vw)] mr-[calc(50%-50vw)] overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_#3b82f6_0,_transparent_55%),_radial-gradient(circle_at_bottom,_#ec4899_0,_transparent_55%)] opacity-40" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/60 to-black" />
 
-        <div className="relative max-w-5xl mx-auto px-4 sm:px-6 pt-16 pb-10">
-          <div className="flex flex-col sm:flex-row items-center sm:items-end gap-5 sm:gap-7">
-            {/* Avatar + ring */}
-            <div className="relative">
-              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-gradient-to-tr from-brand-dark via-brand to-brand-light p-[3px] shadow-[0_18px_45px_rgba(15,23,42,0.9)]">
-                <div className="w-full h-full rounded-full bg-zinc-950 grid place-items-center overflow-hidden">
-                  {user.photoURL ? (
-                    <img
-                      src={user.photoURL}
-                      alt={user.displayName || "Avatar"}
-                      className="w-full h-full object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <span className="text-3xl font-semibold">
-                      {(user.displayName || user.email || "?")
-                        .charAt(0)
-                        .toUpperCase()}
-                    </span>
-                  )}
-                </div>
+        <div className="relative max-w-5xl mx-auto px-4 sm:px-6 pt-16 pb-6">
+          <div className="flex flex-col sm:flex-row items-center sm:items-end gap-5">
+            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-gradient-to-tr from-brand-dark via-brand to-brand-light p-[3px] shrink-0">
+              <div className="w-full h-full rounded-full bg-zinc-950 grid place-items-center overflow-hidden">
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || "Avatar"}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <span className="text-3xl font-semibold">
+                    {(user.displayName || user.email || "?")
+                      .charAt(0)
+                      .toUpperCase()}
+                  </span>
+                )}
               </div>
-
-              {/* Shine ring */}
-              <div className="pointer-events-none absolute inset-0 rounded-full blur-xl bg-brand/50 opacity-60" />
             </div>
 
-            {/* Name + email + role badge */}
             <div className="flex-1 min-w-0 text-center sm:text-left">
-              <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-                {user.displayName || "Pengguna Gachaverse"}
+              <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight truncate">
+                {user.displayName || "Pengguna GVComics"}
               </h1>
-              <p className="mt-1 text-xs sm:text-sm text-zinc-300 truncate">
+              <p className="mt-1 text-xs sm:text-sm text-zinc-400 truncate">
                 {user.email}
               </p>
-
-              {/* Role badge dengan efek mengkilap */}
-              <div className="mt-3 inline-flex items-center gap-2">
-                <div
-                  className={`
-                    relative inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl
-                    text-xs sm:text-sm font-semibold
-                    bg-gradient-to-r ${roleStyle.badgeClass}
-                    border ${roleStyle.badgeClass.includes("border-") ? "" : ""}
-                    shadow-[0_10px_30px_rgba(0,0,0,0.7)]
-                    overflow-hidden
-                  `}
+              <div className="mt-3 flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                <span
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r ${roleStyle.badge} shadow-lg`}
                 >
-                  {/* shine bergerak */}
-                  <span className="pointer-events-none absolute -left-10 top-0 h-full w-10 bg-white/40 blur-lg transform -skew-x-12 animate-[pulse_2.2s_ease-in-out_infinite]" />
-
-                  <RoleIcon className="w-4 h-4 drop-shadow-sm" />
-                  <span>{roleStyle.label}</span>
-                </div>
-                <span className="text-[11px] text-zinc-300">
+                  <RoleIcon className="w-3.5 h-3.5" />
+                  {roleStyle.label}
+                </span>
+                <span className="text-[11px] text-zinc-400">
                   {roleStyle.desc}
                 </span>
               </div>
             </div>
 
-            {/* Small chip total series */}
-            <div className="hidden sm:flex flex-col items-end gap-2">
-              <div className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-black/50 ring-1 ring-white/10 backdrop-blur">
-                <BookOpen className="w-4 h-4 text-brand" />
-                <div className="text-xs">
-                  <div className="font-semibold">
-                    {stats?.totalSeries ?? 0} series
-                  </div>
-                  <div className="text-zinc-400">dalam koleksimu</div>
-                </div>
-              </div>
-            </div>
+            {doLogout && (
+              <button
+                type="button"
+                onClick={() => doLogout()}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 text-xs ring-1 ring-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Keluar
+              </button>
+            )}
           </div>
+
+          {/* TABS */}
+          <nav
+            className="mt-7 flex gap-1 border-b border-white/10"
+            role="tablist"
+            aria-label="Bagian profil"
+          >
+            {[
+              ["ringkasan", "Ringkasan"],
+              ["komentar", `Komentar${comments.length ? ` (${comments.length})` : ""}`],
+              ["dukung", "Dukung kami"],
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                role="tab"
+                aria-selected={tab === id}
+                onClick={() => setTab(id)}
+                className={`relative px-4 py-2.5 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white ${
+                  tab === id
+                    ? "text-white"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                {label}
+                {tab === id && (
+                  <span className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-brand" />
+                )}
+              </button>
+            ))}
+          </nav>
         </div>
       </section>
 
-      {/* BODY */}
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 pb-24 pt-2 space-y-6 sm:space-y-7">
-        {/* STATS GRID */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <StatCard
-            label="Manga"
-            value={stats?.manga ?? 0}
-            sub="judul pernah kamu baca"
-            accent="from-sky-500/80 to-sky-400/40"
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 pb-24 pt-5">
+        {tab === "ringkasan" && (
+          <Overview
+            stats={{
+              comments: comments.length,
+              replies: repliesTotal,
+              history: localStats.history,
+              bookmarks: localStats.bookmarks,
+            }}
+            commentsReady={cState === "ok"}
+            popular={popular}
+            announcements={announcements}
+            role={role}
+            onSupport={() => setTab("dukung")}
           />
-          <StatCard
-            label="Manhwa"
-            value={stats?.manhwa ?? 0}
-            sub="judul berwarna favoritmu"
-            accent="from-emerald-500/80 to-emerald-400/40"
+        )}
+
+        {tab === "komentar" && (
+          <CommentHistory
+            comments={comments}
+            state={cState}
+            onReload={loadComments}
           />
-          <StatCard
-            label="Manhua"
-            value={stats?.manhua ?? 0}
-            sub="judul asal Tiongkok"
-            accent="from-amber-500/80 to-amber-400/40"
-          />
-          <StatCard
-            label="Waktu Baca"
-            value={`${stats?.minutes ?? 0} mnt`}
-            sub="total estimasi waktu baca"
-            icon={<Flame className="w-4 h-4 text-orange-400" />}
-            accent="from-rose-500/80 to-orange-500/40"
-          />
-        </section>
+        )}
 
-        {/* MEMBERSHIP & CREATOR SECTION */}
-        <section className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-4 sm:gap-5">
-          {/* Membership / role detail */}
-          <div className="rounded-3xl bg-zinc-950/70 ring-1 ring-white/10 p-5 sm:p-6 shadow-[0_20px_45px_rgba(0,0,0,0.75)] relative overflow-hidden">
-            <div className="pointer-events-none absolute -top-16 -right-10 w-40 h-40 rounded-full blur-3xl opacity-60" style={{ background: "radial-gradient(circle, rgba(56,189,248,0.8), transparent)" }} />
-            <div className="flex items-start justify-between gap-3 mb-3">
-              <div>
-                <h2 className="text-sm font-semibold tracking-wide text-zinc-200 uppercase">
-                  Status Akun
-                </h2>
-                <p className="mt-1 text-xs text-zinc-400">
-                  Peranmu menentukan akses fitur & panel yang tersedia.
-                </p>
-              </div>
-              <Sparkles className="w-5 h-5 text-brand" />
-            </div>
-
-            <div className="mt-3 flex flex-col sm:flex-row gap-4 sm:gap-5 items-stretch">
-              <div className="flex-1">
-                <div className="text-[11px] uppercase tracking-wide text-zinc-400">
-                  Role saat ini
-                </div>
-                <div className="mt-1 inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-black/60 ring-1 ring-white/10">
-                  <RoleIcon className="w-4 h-4 text-brand" />
-                  <span className="text-sm font-semibold">
-                    {roleStyle.label}
-                  </span>
-                </div>
-                <p className="mt-2 text-xs text-zinc-300 leading-relaxed">
-                  {roleStyle.desc}
-                </p>
-              </div>
-
-              {/* Info khusus Membership */}
-              {role === "membership" && (
-                <div className="w-full sm:w-40 rounded-2xl bg-gradient-to-b from-brand/10 to-brand/0 ring-1 ring-brand/50 px-3 py-3 text-xs">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Gem className="w-4 h-4 text-cyan-300" />
-                    <span className="font-semibold">Membership Aktif</span>
-                  </div>
-                  <p className="text-zinc-300 text-[11px] leading-relaxed">
-                    Terima kasih sudah mendukung GVComics. Kamu bebas iklan dan
-                    dapat prioritas update.
-                  </p>
-                  <div className="mt-2 text-[10px] text-zinc-400">
-                    *Integrasi tanggal kadaluarsa bisa diisi dari API nanti.
-                  </div>
-                </div>
-              )}
-
-              {/* Info khusus Basic → ajakan upgrade */}
-              {role === "basic" && (
-                <div className="w-full sm:w-40 rounded-2xl bg-gradient-to-b from-zinc-800/90 to-zinc-900 ring-1 ring-white/10 px-3 py-3 text-xs">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Gem className="w-4 h-4 text-cyan-300" />
-                    <span className="font-semibold">Upgrade Membership</span>
-                  </div>
-                  <p className="text-zinc-300 text-[11px] leading-relaxed">
-                    Buka akses tanpa iklan, antrian server prioritas, dan tema
-                    eksklusif hanya dengan satu klik.
-                  </p>
-                  <button
-                    className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-brand-dark via-brand to-brand-light text-[11px] font-semibold hover:brightness-110"
-                    type="button"
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    Lihat paket
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Creator corner / CTA */}
-          <CreatorCorner role={role} />
-        </section>
-
-        {/* LEADERBOARD KREATOR */}
-        <section className="rounded-3xl bg-zinc-950/80 ring-1 ring-white/10 p-5 sm:p-6 shadow-[0_22px_55px_rgba(0,0,0,0.8)]">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div>
-              <h2 className="text-sm font-semibold tracking-wide text-zinc-200 uppercase">
-                Leaderboard Kreator Novel
-              </h2>
-              <p className="mt-1 text-xs text-zinc-400">
-                10 kreator dengan total views tertinggi. Data ini bisa kamu
-                tarik dari API statistik nanti.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-900 hover:bg-zinc-800 text-[11px] ring-1 ring-white/10"
-            >
-              Lihat semua
-              <ArrowUpRight className="w-3 h-3" />
-            </button>
-          </div>
-
-          <div className="mt-2 divide-y divide-white/5">
-            {leaderboard.map((item, index) => (
-              <div
-                key={item.id}
-                className="flex items-center gap-3 py-2.5 text-sm"
-              >
-                {/* Rank */}
-                <div className="w-7 text-xs font-semibold text-zinc-400">
-                  #{index + 1}
-                </div>
-
-                {/* Avatar kecil */}
-                <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-zinc-700 to-zinc-500 grid place-items-center text-xs font-semibold text-white/90">
-                  {item.name.charAt(0)}
-                </div>
-
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5">
-                    <div className="min-w-0">
-                      <div className="font-semibold truncate">
-                        {item.name}
-                      </div>
-                      <div className="text-[11px] text-zinc-400 truncate">
-                        {item.title}
-                      </div>
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-brand font-semibold flex items-center gap-1 sm:ml-3">
-                      <Flame className="w-3 h-3 text-orange-400" />
-                      {formatViews(item.views)} views
-                    </div>
-                  </div>
-                </div>
-
-                {/* tiny pill */}
-                <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded-full bg-zinc-900/90 text-[10px] text-zinc-300">
-                  Novel
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
+        {tab === "dukung" && <SupportTab role={role} />}
       </main>
     </div>
   );
 }
 
-/** --- Komponen kecil --- */
+/* ============================== OVERVIEW ============================ */
 
-function StatCard({ label, value, sub, accent, icon }) {
+function Overview({ stats, commentsReady, popular, announcements, role, onSupport }) {
   return (
-    <div className="relative overflow-hidden rounded-3xl bg-zinc-950/80 ring-1 ring-white/10 p-4 sm:p-5 shadow-[0_16px_40px_rgba(0,0,0,0.75)]">
-      <div
-        className={`pointer-events-none absolute -top-10 -right-6 w-24 h-24 rounded-full blur-3xl opacity-60 bg-gradient-to-br ${accent}`}
-      />
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-wide text-zinc-400">
-            {label}
+    <div className="space-y-6">
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Stat
+          icon={MessageSquare}
+          label="Komentar"
+          value={commentsReady ? stats.comments : "-"}
+          sub="yang pernah kamu tulis"
+        />
+        <Stat
+          icon={CornerDownRight}
+          label="Balasan"
+          value={commentsReady ? stats.replies : "-"}
+          sub="dari pembaca lain"
+        />
+        <Stat
+          icon={History}
+          label="Riwayat baca"
+          value={stats.history}
+          sub="chapter terakhir dibuka"
+        />
+        <Stat
+          icon={Bookmark}
+          label="Bookmark"
+          value={stats.bookmarks}
+          sub="series tersimpan"
+        />
+      </section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-5">
+        <section className="rounded-3xl bg-zinc-950/80 ring-1 ring-white/10 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Flame className="w-4 h-4 text-orange-400" />
+            <h2 className="text-sm font-semibold text-zinc-100">
+              Lagi populer minggu ini
+            </h2>
           </div>
-          <div className="mt-1 text-xl sm:text-2xl font-semibold">
-            {value}
-          </div>
-          <div className="mt-1 text-[11px] text-zinc-400">{sub}</div>
-        </div>
-        <div className="w-9 h-9 rounded-2xl bg-black/60 ring-1 ring-white/10 grid place-items-center">
-          {icon || <BookOpen className="w-4 h-4 text-brand" />}
+          {popular.length === 0 ? (
+            <p className="text-xs text-zinc-500 py-6 text-center">
+              Memuat daftar populer鈥�
+            </p>
+          ) : (
+            <ul className="divide-y divide-white/5">
+              {popular.map((s, i) => (
+                <li key={s.id}>
+                  <Link
+                    to={`/series/${s.slug}`}
+                    className="flex items-center gap-3 py-2.5 hover:bg-white/[0.03] rounded-xl px-1 -mx-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                  >
+                    <span className="w-5 text-xs font-semibold text-zinc-500 text-right">
+                      {i + 1}
+                    </span>
+                    <div className="w-9 h-12 rounded-md bg-zinc-800 overflow-hidden shrink-0">
+                      {s.cover && (
+                        <img
+                          src={s.cover}
+                          alt=""
+                          loading="lazy"
+                          className="w-full h-full object-cover"
+                        />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium truncate">
+                        {s.title}
+                      </div>
+                      <div className="text-[11px] text-zinc-400 truncate">
+                        {s.genres.slice(0, 3).join(", ") || s.badge}
+                      </div>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <div className="space-y-5">
+          {role !== "membership" && role !== "admin" && (
+            <section className="rounded-3xl bg-gradient-to-b from-zinc-800/80 to-zinc-900 ring-1 ring-white/10 p-5">
+              <div className="flex items-center gap-2">
+                <Heart className="w-4 h-4 text-rose-400" />
+                <h2 className="text-sm font-semibold">Bantu GVComics tetap hidup</h2>
+              </div>
+              <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                Dukunganmu membantu biaya server dan update chapter baru.
+              </p>
+              <button
+                type="button"
+                onClick={onSupport}
+                className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-brand-dark via-brand to-brand-light text-xs font-semibold hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+              >
+                Lihat cara mendukung
+              </button>
+            </section>
+          )}
+
+          <section className="rounded-3xl bg-zinc-950/80 ring-1 ring-white/10 p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Megaphone className="w-4 h-4 text-sky-300" />
+              <h2 className="text-sm font-semibold text-zinc-100">Pengumuman</h2>
+            </div>
+            {announcements.length === 0 ? (
+              <p className="text-xs text-zinc-500">Belum ada pengumuman.</p>
+            ) : (
+              <ul className="space-y-3">
+                {announcements.map((a, i) => (
+                  <li key={a.id || i} className="text-xs">
+                    <div className="font-medium text-zinc-200">
+                      {a.title || "Pengumuman"}
+                    </div>
+                    {(a.body || a.message || a.content) && (
+                      <p className="mt-0.5 text-zinc-400 leading-relaxed line-clamp-2">
+                        {a.body || a.message || a.content}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
       </div>
     </div>
   );
 }
 
-function CreatorCorner({ role }) {
-  const isCreator = role === "creator" || role === "admin";
+function Stat({ icon: Icon, label, value, sub }) {
+  return (
+    <div className="rounded-2xl bg-zinc-950/80 ring-1 ring-white/10 p-4">
+      <div className="flex items-center gap-2 text-xs text-zinc-400">
+        <Icon className="w-4 h-4 text-brand" />
+        {label}
+      </div>
+      <div className="mt-2 text-2xl font-semibold tabular-nums">{value}</div>
+      <div className="mt-0.5 text-[11px] text-zinc-500">{sub}</div>
+    </div>
+  );
+}
 
-  if (!isCreator) {
+/* ========================== COMMENT HISTORY ========================= */
+
+function CommentHistory({ comments, state, onReload }) {
+  const [filter, setFilter] = useState("all"); // all | replied
+  const [visible, setVisible] = useState(PAGE_SIZE);
+
+  const list = useMemo(
+    () =>
+      filter === "replied"
+        ? comments.filter((c) => c.replies?.length)
+        : comments,
+    [comments, filter]
+  );
+
+  if (state === "loading" || state === "idle") {
     return (
-      <div className="rounded-3xl bg-zinc-950/70 ring-1 ring-white/10 p-5 sm:p-6 shadow-[0_20px_45px_rgba(0,0,0,0.75)]">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold tracking-wide text-zinc-200 uppercase">
-              Mode Kreator
-            </h2>
-            <p className="mt-1 text-xs text-zinc-400">
-              Punya ide cerita sendiri? Daftar sebagai kreator dan bagikan
-              novelnu ke pembaca lain.
-            </p>
-          </div>
-          <PenSquare className="w-5 h-5 text-fuchsia-300" />
-        </div>
-
-        <button
-          type="button"
-          className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-2xl
-                     bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-500
-                     text-xs font-semibold shadow-lg hover:brightness-110"
-        >
-          <Sparkles className="w-4 h-4" />
-          Daftar jadi kreator
-        </button>
-
-        <p className="mt-2 text-[10px] text-zinc-500">
-          *Tombol ini nanti bisa diarahkan ke form pendaftaran kreator /
-          dashboard kreator-mu.
-        </p>
+      <div className="space-y-3" aria-busy="true">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="h-24 rounded-2xl bg-zinc-900/70 animate-pulse"
+          />
+        ))}
       </div>
     );
   }
 
+  if (state === "unavailable") {
+    return (
+      <EmptyBox
+        title="Riwayat komentar belum aktif"
+        text="Backend belum punya endpoint komentar. Setelah endpoint /users/:uid/comments dibuat, riwayatmu otomatis muncul di sini."
+      />
+    );
+  }
+
+  if (state === "error") {
+    return (
+      <EmptyBox
+        title="Komentar gagal dimuat"
+        text="Periksa koneksi lalu coba lagi."
+        action={
+          <button
+            type="button"
+            onClick={onReload}
+            className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs ring-1 ring-white/10"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Coba lagi
+          </button>
+        }
+      />
+    );
+  }
+
+  if (comments.length === 0) {
+    return (
+      <EmptyBox
+        title="Kamu belum pernah berkomentar"
+        text="Buka chapter favoritmu dan tulis komentar pertamamu."
+        action={
+          <Link
+            to="/"
+            className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-brand-dark via-brand to-brand-light text-xs font-semibold"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            Cari komik
+          </Link>
+        }
+      />
+    );
+  }
+
   return (
-    <div className="rounded-3xl bg-gradient-to-br from-fuchsia-600/40 via-violet-700/40 to-sky-500/40 ring-1 ring-fuchsia-300/60 p-[1px] shadow-[0_22px_55px_rgba(88,28,135,0.7)]">
-      <div className="h-full w-full rounded-[1.4rem] bg-zinc-950/90 p-5 sm:p-6 flex flex-col justify-between">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold tracking-wide text-zinc-100 uppercase">
-              Kreator Corner
-            </h2>
-            <p className="mt-1 text-xs text-zinc-300">
-              Kelola novelmu dan upload chapter baru langsung dari sini.
-            </p>
-          </div>
-          <Flame className="w-5 h-5 text-amber-300" />
-        </div>
-
-        <div className="mt-4 flex flex-col gap-2 text-xs text-zinc-300">
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            <span>Novelmu muncul di leaderboard publik.</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-brand" />
-            <span>Statistik views & pembaca bisa diambil dari API nanti.</span>
-          </div>
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Link
-            to="/creator/new"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-white text-xs font-semibold text-zinc-900 shadow-lg hover:brightness-95"
+    <div>
+      <div className="flex items-center gap-2 mb-4">
+        {[
+          ["all", `Semua (${comments.length})`],
+          [
+            "replied",
+            `Ada balasan (${comments.filter((c) => c.replies?.length).length})`,
+          ],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => {
+              setFilter(id);
+              setVisible(PAGE_SIZE);
+            }}
+            aria-pressed={filter === id}
+            className={`px-3 py-1.5 rounded-full text-xs ring-1 transition-colors ${
+              filter === id
+                ? "bg-white text-zinc-900 ring-white"
+                : "bg-zinc-900 text-zinc-300 ring-white/10 hover:bg-zinc-800"
+            }`}
           >
-            <Plus className="w-4 h-4" />
-            Tulis novel baru
-          </Link>
-          <Link
-            to="/creator/dashboard"
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-zinc-900/80 text-[11px] text-zinc-200 ring-1 ring-white/10 hover:bg-zinc-800"
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {list.length === 0 ? (
+        <EmptyBox
+          title="Belum ada balasan"
+          text="Komentarmu belum dibalas siapa pun."
+        />
+      ) : (
+        <ul className="space-y-3">
+          {list.slice(0, visible).map((c) => (
+            <CommentCard key={c.id} c={c} />
+          ))}
+        </ul>
+      )}
+
+      {list.length > visible && (
+        <div className="mt-4 text-center">
+          <button
+            type="button"
+            onClick={() => setVisible((v) => v + PAGE_SIZE)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-xs ring-1 ring-white/10"
           >
-            <PenSquare className="w-3 h-3" />
-            Dashboard kreator
-          </Link>
+            <ChevronDown className="w-3.5 h-3.5" />
+            Tampilkan lebih banyak
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CommentCard({ c }) {
+  const [open, setOpen] = useState(false);
+  const replyCount = c.replies?.length || 0;
+  const target = c.chapterId
+    ? `/series/${c.seriesSlug}`
+    : `/series/${c.seriesSlug}`;
+
+  return (
+    <li className="rounded-2xl bg-zinc-950/80 ring-1 ring-white/10 p-4">
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-14 rounded-md bg-zinc-800 overflow-hidden shrink-0">
+          {c.seriesCover && (
+            <img
+              src={c.seriesCover}
+              alt=""
+              loading="lazy"
+              className="w-full h-full object-cover"
+            />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2 text-xs">
+            <Link
+              to={target}
+              className="font-semibold text-zinc-100 hover:text-brand truncate max-w-full"
+            >
+              {c.seriesTitle || c.seriesSlug}
+            </Link>
+            {c.chapterNumber != null && (
+              <span className="text-zinc-400">Chapter {c.chapterNumber}</span>
+            )}
+            <span className="text-zinc-500">{timeAgo(c.createdAt)}</span>
+          </div>
+          <p className="mt-1.5 text-sm text-zinc-200 leading-relaxed whitespace-pre-line break-words">
+            {c.text}
+          </p>
+
+          {replyCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => setOpen((o) => !o)}
+              aria-expanded={open}
+              className="mt-2.5 inline-flex items-center gap-1.5 text-xs text-brand hover:brightness-125"
+            >
+              <CornerDownRight className="w-3.5 h-3.5" />
+              {replyCount} balasan
+              <ChevronDown
+                className={`w-3.5 h-3.5 transition-transform ${
+                  open ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+          ) : (
+            <div className="mt-2.5 text-[11px] text-zinc-500">
+              Belum ada balasan
+            </div>
+          )}
         </div>
       </div>
+
+      {open && replyCount > 0 && (
+        <ul className="mt-3 ml-6 pl-4 border-l border-white/10 space-y-3">
+          {c.replies.map((r) => (
+            <li key={r.id} className="flex items-start gap-2.5">
+              <div className="w-7 h-7 rounded-full bg-zinc-800 overflow-hidden grid place-items-center text-[11px] font-semibold shrink-0">
+                {r.avatar ? (
+                  <img
+                    src={r.avatar}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  (r.name || "?").charAt(0).toUpperCase()
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs">
+                  <span className="font-semibold text-zinc-100">{r.name}</span>
+                  <span className="ml-2 text-zinc-500">
+                    {timeAgo(r.createdAt)}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-sm text-zinc-300 leading-relaxed whitespace-pre-line break-words">
+                  {r.text}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function EmptyBox({ title, text, action }) {
+  return (
+    <div className="rounded-3xl bg-zinc-950/70 ring-1 ring-white/10 px-6 py-12 text-center">
+      <MessageSquare className="w-8 h-8 mx-auto text-zinc-600" />
+      <h3 className="mt-3 text-sm font-semibold text-zinc-100">{title}</h3>
+      <p className="mt-1 text-xs text-zinc-400 max-w-sm mx-auto leading-relaxed">
+        {text}
+      </p>
+      {action}
     </div>
+  );
+}
+
+/* ============================== SUPPORT ============================= */
+
+// GANTI dua path ini dengan gambar QRIS & Trakteer-mu (taruh di /public/images).
+const QRIS_IMG = "/images/qris.png";
+const TRAKTEER_IMG = "/images/trakteer.png";
+
+function SupportTab({ role }) {
+  const active = role === "membership" || role === "admin";
+
+  return (
+    <div className="space-y-5">
+      <section className="rounded-3xl bg-zinc-950/80 ring-1 ring-white/10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <Gem className="w-5 h-5 text-cyan-300 mt-0.5 shrink-0" />
+          <div>
+            <h2 className="text-base font-semibold">
+              {active ? "Membership kamu aktif" : "Dukung GVComics"}
+            </h2>
+            <p className="mt-1 text-xs sm:text-sm text-zinc-400 leading-relaxed max-w-prose">
+              {active
+                ? "Terima kasih sudah mendukung. Kamu bebas iklan dan dapat prioritas update."
+                : "Pilih salah satu cara di bawah. Pendukung mendapat akses tanpa iklan dan prioritas update. Setelah membayar, kirim bukti ke admin supaya akunmu diaktifkan."}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <PayCard title="QRIS" hint="Scan dengan e-wallet atau m-banking apa pun." src={QRIS_IMG} />
+        <PayCard title="Trakteer" hint="Scan atau buka halaman Trakteer kami." src={TRAKTEER_IMG} />
+      </div>
+    </div>
+  );
+}
+
+function PayCard({ title, hint, src }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <figure className="rounded-3xl bg-zinc-950/80 ring-1 ring-white/10 p-4 sm:p-5">
+      <div className="aspect-square w-full max-w-[280px] mx-auto rounded-2xl bg-white overflow-hidden grid place-items-center">
+        {failed ? (
+          <span className="px-6 text-center text-xs text-zinc-500">
+            Taruh gambar {title} di {src}
+          </span>
+        ) : (
+          <img
+            src={src}
+            alt={`Kode ${title}`}
+            onError={() => setFailed(true)}
+            className="w-full h-full object-contain"
+          />
+        )}
+      </div>
+      <figcaption className="mt-3 text-center">
+        <div className="text-sm font-semibold">{title}</div>
+        <div className="text-[11px] text-zinc-400">{hint}</div>
+      </figcaption>
+    </figure>
   );
 }
