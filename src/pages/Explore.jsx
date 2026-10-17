@@ -1,6 +1,12 @@
-
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
+import {
+  LayoutGrid,
+  List,
+  Search,
+  SlidersHorizontal,
+  X,
+} from 'lucide-react';
 import {
   fetchLatest,
   fetchGenres,
@@ -11,7 +17,6 @@ import Card from '../components/Card';
 import SectionHeader from '../components/SectionHeader';
 import Pagination from '../components/Pagination';
 import HomeTopBar from '../components/HomeTopBar';
-import { Eye } from 'lucide-react';
 
 import { Swiper, SwiperSlide } from 'swiper/react';
 import {
@@ -144,35 +149,6 @@ const fmtAge = (iso) => {
   return `${Math.floor(months / 12)}y`;
 };
 
-const formatCount = (value) => {
-  const number = Number(value);
-
-  if (!Number.isFinite(number)) return '—';
-  if (number >= 1_000_000) {
-    return `${(number / 1_000_000).toFixed(1)}m`;
-  }
-  if (number >= 1_000) {
-    return `${(number / 1_000).toFixed(1)}k`;
-  }
-
-  return String(number);
-};
-
-const getViews = (item = {}) => {
-  const value =
-    item.stats?.views ??
-    item.views ??
-    item.view ??
-    item.viewCount ??
-    item.viewsCount ??
-    item.totalViews ??
-    item.popularity?.views ??
-    item.metrics?.views ??
-    0;
-
-  return Number(value) || 0;
-};
-
 const extractGenres = (item) =>
   [
     ...getLabels(item?.genres),
@@ -205,6 +181,111 @@ const TypeChip = ({ type }) => {
 const WRAP =
   'mx-auto w-full max-w-[1420px] [--pad:clamp(14px,3.5vw,28px)] px-[var(--pad)]';
 
+/* ======================== TOOLBAR ======================== */
+/* Search + Filter Genre + toggle Grid/List, rata tengah.
+   Warna aktif mengikuti tema corner lewat --explore-accent. */
+
+function ExploreToolbar({
+  query,
+  onQuery,
+  placeholder = 'Cari di Explore鈥�',
+  openFilter,
+  onToggleFilter,
+  activeGenre = '',
+  view,
+  onView,
+}) {
+  const VIEWS = [
+    ['grid', LayoutGrid, 'Tampilan grid'],
+    ['list', List, 'Tampilan daftar'],
+  ];
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
+      {/* Search: satu baris penuh di mobile */}
+      <div className="relative basis-full sm:basis-auto sm:w-80 md:w-96">
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+        <input
+          value={query}
+          onChange={(e) => onQuery(e.target.value)}
+          placeholder={placeholder}
+          aria-label={placeholder}
+          className="h-11 w-full rounded-xl bg-zinc-900/70 pl-10 pr-10 text-sm
+                     ring-1 ring-white/10 placeholder:text-zinc-500
+                     focus:outline-none focus:ring-2
+                     focus:ring-[var(--explore-ring)]"
+        />
+        {query && (
+          <button
+            type="button"
+            onClick={() => onQuery('')}
+            aria-label="Hapus pencarian"
+            className="absolute right-2 top-1/2 -translate-y-1/2
+                       rounded-lg p-1.5 text-zinc-400 hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Filter genre */}
+      <button
+        type="button"
+        onClick={onToggleFilter}
+        aria-expanded={openFilter}
+        className="inline-flex h-11 items-center gap-2 rounded-xl
+                   bg-zinc-800/80 px-4 text-sm font-medium text-zinc-100
+                   transition hover:bg-zinc-700
+                   focus-visible:outline focus-visible:outline-2
+                   focus-visible:outline-white"
+      >
+        <SlidersHorizontal className="h-4 w-4" />
+        <span>{openFilter ? 'Tutup Genre' : 'Filter Genre'}</span>
+        {activeGenre && !openFilter && (
+          <span
+            className="max-w-[7rem] truncate rounded-md px-1.5 py-0.5
+                       text-[11px] capitalize text-white"
+            style={{ backgroundColor: 'var(--explore-accent)' }}
+          >
+            {activeGenre}
+          </span>
+        )}
+      </button>
+
+      {/* Toggle grid / list */}
+      <div className="inline-flex gap-1 rounded-xl bg-zinc-800/60 p-1">
+        {VIEWS.map(([key, Icon, label]) => {
+          const on = view === key;
+
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onView(key)}
+              aria-pressed={on}
+              aria-label={label}
+              title={label}
+              className={`grid h-9 w-11 place-items-center rounded-lg
+                          transition ${
+                            on
+                              ? 'text-white'
+                              : 'text-zinc-300 hover:bg-white/10'
+                          }`}
+              style={
+                on
+                  ? { backgroundColor: 'var(--explore-accent)' }
+                  : undefined
+              }
+            >
+              <Icon className="h-5 w-5" />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ======================== EXPLORE ======================== */
 
 export default function Explore() {
@@ -236,9 +317,13 @@ export default function Explore() {
   const [error, setError] = useState('');
   const [openFilter, setOpenFilter] = useState(false);
 
+  // Search di TopBar (global, ke API)
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
+
+  // Search di toolbar (lokal, menyaring halaman yang sedang dimuat)
+  const [localQuery, setLocalQuery] = useState('');
 
   const theme = THEME[corner] || THEME.all;
 
@@ -366,7 +451,7 @@ export default function Explore() {
     };
   }, [corner, active, page]);
 
-  /* ======================== LIVE SEARCH ======================== */
+  /* ======================== LIVE SEARCH (TOPBAR) ======================== */
 
   useEffect(() => {
     const term = searchQuery.trim();
@@ -414,17 +499,31 @@ export default function Explore() {
     [items]
   );
 
+  // Hasil setelah disaring oleh search di toolbar
+  const visibleItems = useMemo(() => {
+    const q = normalizeText(localQuery);
+    if (!q) return items;
+
+    return items.filter(
+      (item) =>
+        normalizeText(`${item.title} ${item.slug}`).includes(q) ||
+        getSeriesLabels(item).some((label) => label.includes(q))
+    );
+  }, [items, localQuery]);
+
   const isSearchActive = searchQuery.trim().length >= 3;
 
   const selectCorner = (key) => {
     setCorner(key);
     setPage(1);
     setSearchResults([]);
+    setLocalQuery('');
   };
 
   const selectGenre = (genre) => {
     setActive(genre);
     setPage(1);
+    setLocalQuery('');
   };
 
   /* ======================== RENDER ======================== */
@@ -443,55 +542,53 @@ export default function Explore() {
         />
       </div>
 
-      
-{/* THREE CATEGORY TABS */}
-<div className="flex justify-center px-3 sm:px-4">
-  <div
-    className="
-      inline-flex max-w-full items-center gap-0.5 sm:gap-2
-      rounded-[10px] sm:rounded-[16px]
-      border sm:border-[3px] border-[#625b69]
-      bg-[#09090B] p-1 sm:p-2
-    "
-    role="tablist"
-    aria-label="Kategori Explore"
-  >
-    {CORNERS.map((item) => {
-      const selected = corner === item.key;
-
-      return (
-        <button
-          key={item.key}
-          type="button"
-          role="tab"
-          aria-selected={selected}
-          onClick={() => selectCorner(item.key)}
-          className={`
-            shrink-0 whitespace-nowrap rounded-md sm:rounded-[8px]
-            px-2 py-1.5
-            sm:px-5 sm:py-3
-            text-xs sm:text-base font-semibold
-            transition-all duration-200
-            ${
-              selected
-                ? item.key === 'female'
-                  ? 'bg-fuchsia-600 text-white'
-                  : item.key === 'male'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-blue-600 text-white'
-                : 'bg-transparent text-white hover:bg-white/10'
-            }
-          `}
+      {/* THREE CATEGORY TABS */}
+      <div className="flex justify-center px-3 sm:px-4">
+        <div
+          className="
+            inline-flex max-w-full items-center gap-0.5 sm:gap-2
+            rounded-[10px] sm:rounded-[16px]
+            border sm:border-[3px] border-[#625b69]
+            bg-[#09090B] p-1 sm:p-2
+          "
+          role="tablist"
+          aria-label="Kategori Explore"
         >
-          {item.label}
-        </button>
-      );
-    })}
-  </div>
-</div>
+          {CORNERS.map((item) => {
+            const selected = corner === item.key;
 
+            return (
+              <button
+                key={item.key}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => selectCorner(item.key)}
+                className={`
+                  shrink-0 whitespace-nowrap rounded-md sm:rounded-[8px]
+                  px-2 py-1.5
+                  sm:px-5 sm:py-3
+                  text-xs sm:text-base font-semibold
+                  transition-all duration-200
+                  ${
+                    selected
+                      ? item.key === 'female'
+                        ? 'bg-fuchsia-600 text-white'
+                        : item.key === 'male'
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-blue-600 text-white'
+                      : 'bg-transparent text-white hover:bg-white/10'
+                  }
+                `}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-      {/* SEARCH RESULTS */}
+      {/* SEARCH RESULTS (TOPBAR) */}
       {isSearchActive ? (
         <div className={WRAP}>
           <div className="min-h-[50vh] space-y-4">
@@ -512,8 +609,10 @@ export default function Explore() {
             </div>
 
             {isSearching ? (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3
-                              md:grid-cols-4 lg:grid-cols-6 animate-pulse">
+              <div
+                className="grid grid-cols-2 gap-3 sm:grid-cols-3
+                           md:grid-cols-4 lg:grid-cols-6 animate-pulse"
+              >
                 {Array.from({ length: 8 }).map((_, index) => (
                   <div
                     key={index}
@@ -525,8 +624,10 @@ export default function Explore() {
                 ))}
               </div>
             ) : searchResults.length > 0 ? (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3
-                              md:grid-cols-4 lg:grid-cols-6">
+              <div
+                className="grid grid-cols-2 gap-3 sm:grid-cols-3
+                           md:grid-cols-4 lg:grid-cols-6"
+              >
                 {searchResults.map((item, index) => (
                   <Card
                     key={item.id || item.slug || index}
@@ -535,11 +636,13 @@ export default function Explore() {
                 ))}
               </div>
             ) : (
-              <div className="rounded-md bg-zinc-900/40 py-16
-                              text-center text-zinc-400
-                              ring-1 ring-white/5">
-                Tidak ada komik yang cocok dengan kata kunci
-                {' '}"{searchQuery}".
+              <div
+                className="rounded-md bg-zinc-900/40 py-16
+                           text-center text-zinc-400
+                           ring-1 ring-white/5"
+              >
+                Tidak ada komik yang cocok dengan kata kunci{' '}
+                &quot;{searchQuery}&quot;.
               </div>
             )}
           </div>
@@ -549,15 +652,21 @@ export default function Explore() {
           {/* HERO SLIDER */}
           <div className={WRAP}>
             {loading ? (
-              <div className="animate-pulse overflow-hidden
-                              rounded-2xl bg-zinc-900">
-                <div className="h-[54vw] bg-zinc-800
-                                sm:h-[38vw] lg:h-[460px]" />
+              <div
+                className="animate-pulse overflow-hidden
+                           rounded-2xl bg-zinc-900"
+              >
+                <div
+                  className="h-[54vw] bg-zinc-800
+                             sm:h-[38vw] lg:h-[460px]"
+                />
               </div>
             ) : !error && heroItems.length > 0 ? (
-              <div className="overflow-hidden rounded-none
-                              ring-0 md:rounded-3xl md:ring-1
-                              md:ring-white/10">
+              <div
+                className="overflow-hidden rounded-none
+                           ring-0 md:rounded-3xl md:ring-1
+                           md:ring-white/10"
+              >
                 <Swiper
                   key={`${corner}-${heroItems.length}`}
                   modules={[
@@ -605,10 +714,12 @@ export default function Explore() {
                           loading="lazy"
                         />
 
-                        <div className="absolute inset-0
-                                        bg-gradient-to-r
-                                        from-black/80 via-black/40
-                                        to-transparent" />
+                        <div
+                          className="absolute inset-0
+                                     bg-gradient-to-r
+                                     from-black/80 via-black/40
+                                     to-transparent"
+                        />
 
                         <div
                           data-swiper-parallax="-100"
@@ -616,21 +727,27 @@ export default function Explore() {
                                      max-w-[min(720px,80%)]
                                      pr-[var(--pad)] sm:bottom-12"
                         >
-                          <h3 className="text-2xl font-extrabold
-                                         leading-tight text-white
-                                         drop-shadow sm:text-4xl">
+                          <h3
+                            className="text-2xl font-extrabold
+                                       leading-tight text-white
+                                       drop-shadow sm:text-4xl"
+                          >
                             {item.title}
                           </h3>
 
                           {(item.description || item.desc) && (
-                            <p className="mt-2 line-clamp-2
-                                          text-zinc-200/90 sm:line-clamp-3">
+                            <p
+                              className="mt-2 line-clamp-2
+                                         text-zinc-200/90 sm:line-clamp-3"
+                            >
                               {item.description || item.desc}
                             </p>
                           )}
 
-                          <div className="mt-3 flex flex-wrap
-                                          items-center gap-2">
+                          <div
+                            className="mt-3 flex flex-wrap
+                                       items-center gap-2"
+                          >
                             <TypeChip type={item.type} />
 
                             {item.badge && (
@@ -638,7 +755,8 @@ export default function Explore() {
                                 className="rounded-md px-2 py-1
                                            text-xs text-white"
                                 style={{
-                                  backgroundColor: 'var(--explore-accent)',
+                                  backgroundColor:
+                                    'var(--explore-accent)',
                                 }}
                               >
                                 {item.badge}
@@ -646,9 +764,11 @@ export default function Explore() {
                             )}
 
                             {item.updatedAt && (
-                              <span className="rounded-md
-                                               bg-zinc-800/90 px-2 py-1
-                                               text-xs text-zinc-200">
+                              <span
+                                className="rounded-md
+                                           bg-zinc-800/90 px-2 py-1
+                                           text-xs text-zinc-200"
+                              >
                                 {fmtAge(item.updatedAt)}
                               </span>
                             )}
@@ -664,7 +784,7 @@ export default function Explore() {
 
           {/* EXPLORE CONTROLS */}
           <div className={WRAP}>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="mt-4">
               <SectionHeader
                 title={
                   corner === 'male'
@@ -675,47 +795,24 @@ export default function Explore() {
                 }
               />
 
-              <div className="ml-auto flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setOpenFilter((value) => !value)}
-                  aria-expanded={openFilter}
-                  className="rounded-md bg-zinc-800 px-3 py-2
-                             text-sm text-zinc-100 transition
-                             hover:bg-zinc-700"
-                >
-                  {openFilter ? 'Tutup Genre' : 'Filter Genre'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setView('grid')}
-                  aria-pressed={view === 'grid'}
-                  className={`explore-view-btn ${
-                    view === 'grid' ? 'explore-view-btn-active' : ''
-                  }`}
-                >
-                  ▦ Grid
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setView('list')}
-                  aria-pressed={view === 'list'}
-                  className={`explore-view-btn ${
-                    view === 'list' ? 'explore-view-btn-active' : ''
-                  }`}
-                >
-                  ▤ List
-                </button>
-              </div>
+              <ExploreToolbar
+                query={localQuery}
+                onQuery={setLocalQuery}
+                openFilter={openFilter}
+                onToggleFilter={() => setOpenFilter((value) => !value)}
+                activeGenre={active}
+                view={view}
+                onView={setView}
+              />
             </div>
 
             {/* GENRE FILTER */}
             {openFilter && (
-              <div className="mt-4 rounded-md bg-zinc-900/60
-                              p-3 ring-1 ring-white/10 sm:p-4">
-                <div className="flex flex-wrap gap-2">
+              <div
+                className="mt-4 rounded-md bg-zinc-900/60
+                           p-3 ring-1 ring-white/10 sm:p-4"
+              >
+                <div className="flex flex-wrap justify-center gap-2">
                   <button
                     type="button"
                     onClick={() => selectGenre('')}
@@ -746,9 +843,11 @@ export default function Explore() {
 
             {/* SERIES LIST */}
             {loading ? (
-              <div className="mt-6 grid grid-cols-2 gap-3
-                              animate-pulse sm:grid-cols-3
-                              md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+              <div
+                className="mt-6 grid grid-cols-2 gap-3
+                           animate-pulse sm:grid-cols-3
+                           md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+              >
                 {Array.from({ length: 12 }).map((_, index) => (
                   <div
                     key={index}
@@ -765,23 +864,27 @@ export default function Explore() {
               </div>
             ) : error ? (
               <div className="mt-6 text-red-400">{error}</div>
-            ) : items.length > 0 ? (
+            ) : visibleItems.length > 0 ? (
               <div className="mt-6">
                 {view === 'grid' ? (
-                  <div className="grid grid-cols-2 gap-3
-                                  sm:grid-cols-3 sm:gap-4
-                                  md:grid-cols-4 lg:grid-cols-5
-                                  xl:grid-cols-6">
-                    {items.map((item, index) => (
+                  <div
+                    className="grid grid-cols-2 gap-3
+                               sm:grid-cols-3 sm:gap-4
+                               md:grid-cols-4 lg:grid-cols-5
+                               xl:grid-cols-6"
+                  >
+                    {visibleItems.map((item, index) => (
                       <div
                         key={item.slug || item.id || index}
                         className="relative min-w-0"
                       >
                         {item.updatedAt && (
-                          <div className="absolute left-2 top-2 z-10
-                                          rounded-md bg-black/70
-                                          px-1.5 py-0.5 text-[11px]
-                                          text-white">
+                          <div
+                            className="absolute left-2 top-2 z-10
+                                       rounded-md bg-black/70
+                                       px-1.5 py-0.5 text-[11px]
+                                       text-white"
+                          >
                             {fmtAge(item.updatedAt)}
                           </div>
                         )}
@@ -798,7 +901,7 @@ export default function Explore() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {items.map((item, index) => {
+                    {visibleItems.map((item, index) => {
                       const itemGenres = extractGenres(item).slice(0, 3);
 
                       return (
@@ -828,11 +931,11 @@ export default function Explore() {
                               {item.title}
                             </div>
 
-                            <div className="mt-1 flex flex-wrap
-                                            items-center gap-3
-                                            text-[11px] text-zinc-400">
-                          
-
+                            <div
+                              className="mt-1 flex flex-wrap
+                                         items-center gap-3
+                                         text-[11px] text-zinc-400"
+                            >
                               {item.updatedAt && (
                                 <span>
                                   Updated {fmtAge(item.updatedAt)} ago
@@ -862,16 +965,20 @@ export default function Explore() {
                 )}
               </div>
             ) : (
-              <div className="mt-6 rounded-xl bg-zinc-900/40
-                              px-4 py-12 text-center
-                              text-zinc-400 ring-1 ring-white/5">
-                {corner === 'male'
-                  ? 'Belum ada komik dengan tag Male MC pada data yang dimuat.'
-                  : corner === 'female'
-                    ? 'Belum ada komik dengan tag Female MC pada data yang dimuat.'
-                    : active
-                      ? `Belum ada komik dengan genre ${active}.`
-                      : 'Tidak ada data.'}
+              <div
+                className="mt-6 rounded-xl bg-zinc-900/40
+                           px-4 py-12 text-center
+                           text-zinc-400 ring-1 ring-white/5"
+              >
+                {localQuery.trim()
+                  ? `Tidak ada komik "${localQuery}" di halaman ini.`
+                  : corner === 'male'
+                    ? 'Belum ada komik dengan tag Male MC pada data yang dimuat.'
+                    : corner === 'female'
+                      ? 'Belum ada komik dengan tag Female MC pada data yang dimuat.'
+                      : active
+                        ? `Belum ada komik dengan genre ${active}.`
+                        : 'Tidak ada data.'}
               </div>
             )}
 
