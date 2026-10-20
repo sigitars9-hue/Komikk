@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import CommentsSection from "../components/CommentsSection";
 import {MessageSquare } from 'lucide-react';
-
+import NextChapterBanner from '../components/NextChapterBanner';
 
 import {
   ChevronLeft, ChevronRight, Home, Settings, Play, Pause, List,
@@ -212,14 +212,15 @@ useEffect(() => {
 
   
   const [showTip, setShowTip] = useState(false);
-  const [nextPending, setNextPending] = useState(false);
-  useEffect(() => {
-  cancelNextDelay();
-}, [slug, cid]);
-
+    const [nextPending, setNextPending] = useState(false);
   const [nextCountdown, setNextCountdown] = useState(0);
   const nextTimerRef = useRef(null);
   const countdownRef = useRef(null);
+  const autoNextOffRef = useRef(false);
+  useEffect(() => {
+    autoNextOffRef.current = false;
+    cancelNextDelay();
+  }, [slug, cid]);
   // ⬇️ state baru untuk Lazy Load
   const [lazyLoad, setLazyLoad] = useState(() => {
     try {
@@ -550,7 +551,7 @@ useEffect(() => {
     const distanceFromBottom = fullH - (y + vh);
 
     // 1) BELUM ada timer & sudah nempel ke bawah -> arm sekali
-    if (!nextTimerRef.current && distanceFromBottom <= 24) {
+        if (!nextTimerRef.current && !autoNextOffRef.current && distanceFromBottom <= 24) {
       armNextWithDelay(next, y);
       return;
     }
@@ -941,58 +942,20 @@ style={{
           />
 
           {/* ── Banner Auto Next Chapter: di bawah komentar ── */}
-          {nextPending && next && (
-            <div className="mt-8 flex justify-center">
-              <div
-                className="
-                  w-full max-w-[960px]
-                  rounded-3xl bg-zinc-950/90 ring-1 ring-white/10 shadow-xl
-                  px-4 sm:px-6 py-5 sm:py-6
-                "
-              >
-                <div className="flex flex-col items-center text-center gap-3 sm:gap-4">
-                  {/* Gambar Yura */}
-                  <div className="flex items-center justify-center">
-                    <img
-                      src="/yura-next-ch.png"
-                      alt="Yura"
-                      className="w-40 sm:w-44 h-auto shadow-lg"
-                      draggable={false}
-                    />
-                  </div>
-
-                  {/* Teks */}
-                  <div className="space-y-1">
-                    <p className="text-sm sm:text-base font-semibold">
-                      Sebentar, Yura bantu pindah ke chapter selanjutnya ya kak
-                    </p>
-                    <p className="text-[11px] sm:text-xs text-zinc-400">
-                      Auto lanjut ke{" "}
-                      <span className="font-semibold">Chapter {next.number}</span>{" "}
-                      dalam{" "}
-                      <span className="font-semibold">
-                        {Math.ceil(nextCountdown || 0)}
-                      </span>{" "}
-                      detik…
-                    </p>
-                  </div>
-                </div>
-
-                {/* Progress bar 5 detik */}
-                <div className="mt-4 w-full h-2 rounded-full bg-zinc-800 overflow-hidden">
-                  <div
-                    className="h-full bg-brand transition-[width] duration-200 ease-out"
-                    style={{
-                      width: `${
-                        ((AUTO_NEXT_DELAY / 1000 - nextCountdown) /
-                          (AUTO_NEXT_DELAY / 1000)) *
-                        100
-                      }%`,
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
+                    {nextPending && next && (
+            <NextChapterBanner
+              chapterNumber={next.number}
+              countdown={nextCountdown}
+              duration={AUTO_NEXT_DELAY}
+              onNow={() => {
+                cancelNextDelay();
+                navigate(toChapterHref(next));
+              }}
+              onCancel={() => {
+                autoNextOffRef.current = true;
+                cancelNextDelay();
+              }}
+            />
           )}
         </div>
            )}
