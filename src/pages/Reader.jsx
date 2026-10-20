@@ -931,28 +931,6 @@ style={{
         </div>
       )}
 
-      {/* ── Komentar per chapter ── */}
-      {chapterKey && (
-        <div className="mt-6 px-4 sm:px-6 md:px-8 pb-10">
-          <section className="rounded-2xl border border-white/10 bg-zinc-900/40">
-            <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
-              <MessageSquare className="h-4 w-4" />
-              <div className="text-sm font-semibold">Komentar</div>
-            </div>
-
-            <div className="p-4">
-              <CommentsSection
-                chapterId={String(current?.id || current?.number || `${slug}-${cid}`)}
-                isAuthor={false}
-              />
-
-              {/* ── Rules Komentar ── */}
-              <section className="mt-8 rounded-2xl border border-white/10 bg-zinc-900/60 px-4 py-4 sm:px-6 sm:py-5">
-                {/* ...isi rules persis seperti punyamu... */}
-              </section>
-            </div>
-          </section>
-
 {/* ── Banner Auto Next Chapter: di bawah komentar, di atas footer ── */}
 {nextPending && next && (
   <div className="mt-8 flex justify-center">
