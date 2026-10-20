@@ -1,16 +1,16 @@
- import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import {
   SendHorizontal,
   Loader2,
   SmilePlus,
   X,
-  Reply,
-  Edit2,
-  Trash2,
   Pin,
   PinOff,
   MoreHorizontal,
+  ThumbsUp,
+  ChevronDown,
+  EyeOff,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -22,17 +22,21 @@ function hashToIndex(s, mod) {
 }
 function avatarGradient(name) {
   const palettes = [
-    "from-sky-600 to-cyan-500",
-    "from-blue-600 to-sky-500",
+    "from-violet-600 to-indigo-500",
     "from-indigo-600 to-sky-500",
-    "from-cyan-600 to-teal-500",
-    "from-sky-700 to-blue-500",
-    "from-blue-700 to-indigo-500",
+    "from-fuchsia-600 to-violet-500",
+    "from-sky-600 to-cyan-500",
+    "from-blue-600 to-violet-500",
+    "from-pink-600 to-rose-500",
   ];
   const idx = hashToIndex((name || "guest").toLowerCase(), palettes.length);
   return `bg-gradient-to-br ${palettes[idx]}`;
 }
 const initial = (n) => ((n || "Guest").trim()[0] || "G").toUpperCase();
+const fmtDate = (iso) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("sv-SE"); // 2026-09-11
+};
 
 /** ===== Stickers di /public/stickers ===== */
 const STICKERS = [
@@ -68,6 +72,9 @@ const stickerUrl = (c) =>
     ? c.content.slice(9)
     : null);
 
+const SPOILER_RE = /^\s*\[spoiler[^\]]*\]\s*/i;
+const RULES_KEY = "gv:comment-rules:collapsed";
+
 /** ====== Komponen utama ====== */
 export default function CommentsSection({
   chapterId,
@@ -80,6 +87,7 @@ export default function CommentsSection({
 
   /** State list */
   const [comments, setComments] = useState([]);
+  const [total, setTotal] = useState(null);
   const [order, setOrder] = useState("new"); // "new" | "old" | "top"
   const [listLoading, setListLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -91,29 +99,32 @@ export default function CommentsSection({
   const [sending, setSending] = useState(false);
   const [submitErr, setSubmitErr] = useState(null);
   const remaining = maxLength - text.length;
+  const spoilerOn = SPOILER_RE.test(text);
 
   /** Reply & edit inline */
   const [replyFor, setReplyFor] = useState(null);
   const [replyText, setReplyText] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState("");
+  const [expanded, setExpanded] = useState({}); // { [rootId]: true }
 
   /** Stickers modal */
   const [pickerOpen, setPickerOpen] = useState(null);
 
   /** Reactions */
-  const [counts, setCounts] = useState({
-    upvote: 0,
-    suki: 0,
-    apsih: 0,
-  });
+  const [counts, setCounts] = useState({ upvote: 0, suki: 0, apsih: 0 });
   const [myReact, setMyReact] = useState({});
   const [loadingReact, setLoadingReact] = useState({});
+
+  /** Likes komentar (tabel comment_likes; kalau belum ada, tombol like disembunyikan) */
+  const [likeCounts, setLikeCounts] = useState({});
+  const [myLikes, setMyLikes] = useState({});
+  const [likesOn, setLikesOn] = useState(true);
 
   /** Menu titik tiga aktif untuk id komentar tertentu */
   const [menuFor, setMenuFor] = useState(null);
 
-  // ── auth ──
+  // 鈹€鈹€ auth 鈹€鈹€
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -128,6 +139,18 @@ export default function CommentsSection({
     })();
   }, []);
 
+  // tutup menu titik tiga saat klik di luar
+  useEffect(() => {
+    if (menuFor == null) return;
+    const close = (e) => {
+      if (!e.target.closest?.("[data-comment-menu]")) setMenuFor(null);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [menuFor]);
+
+  const signIn = () => supabase.auth.signInWithOAuth({ provider: "google" });
+
   /** Load comments + pagination */
   async function fetchPage(p = 0) {
     setListLoading(true);
@@ -135,7 +158,7 @@ export default function CommentsSection({
     const to = from + PAGE - 1;
 
     const asc = order === "old";
-    const query = supabase
+    const { data, error } = await supabase
       .from("chapters_comments")
       .select(
         "id,chapter_id,user_id,display_name,content,created_at,parent_id,kind,sticker_url,edited_at"
@@ -144,33 +167,22 @@ export default function CommentsSection({
       .order("created_at", { ascending: asc })
       .range(from, to);
 
-    const { data, error } = await query;
     if (error) {
       setListLoading(false);
       return;
     }
 
-    const merged = p === 0 ? data : [...comments, ...data];
-
-    const topSorted = (() => {
-      if (order !== "top") return merged;
-      const replyCount = {};
-      merged.forEach((c) => {
-        if (c.parent_id)
-          replyCount[c.parent_id] = (replyCount[c.parent_id] || 0) + 1;
-      });
-      return [...merged].sort((a, b) => {
-        const pinA = isPinned(a) ? 1 : 0;
-        const pinB = isPinned(b) ? 1 : 0;
-        if (pinA !== pinB) return pinB - pinA;
-        if (a.parent_id || b.parent_id) return 0;
-        return (replyCount[b.id] || 0) - (replyCount[a.id] || 0);
-      });
-    })();
-
-    setComments(topSorted);
+    setComments(p === 0 ? data : [...comments, ...data]);
     setHasMore((data || []).length === PAGE);
     setListLoading(false);
+  }
+
+  async function loadTotal() {
+    const { count } = await supabase
+      .from("chapters_comments")
+      .select("id", { count: "exact", head: true })
+      .eq("chapter_id", chapterId);
+    if (typeof count === "number") setTotal(count);
   }
 
   async function loadReactions() {
@@ -189,10 +201,32 @@ export default function CommentsSection({
     setMyReact(mine);
   }
 
+  async function loadLikes() {
+    const { data, error } = await supabase
+      .from("comment_likes")
+      .select("comment_id,user_id")
+      .eq("chapter_id", String(chapterId));
+    if (error) {
+      setLikesOn(false);
+      return;
+    }
+    const n = {};
+    const mine = {};
+    (data || []).forEach((r) => {
+      n[r.comment_id] = (n[r.comment_id] || 0) + 1;
+      if (r.user_id === userId) mine[r.comment_id] = true;
+    });
+    setLikesOn(true);
+    setLikeCounts(n);
+    setMyLikes(mine);
+  }
+
   useEffect(() => {
     setPage(0);
     fetchPage(0);
+    loadTotal();
     loadReactions();
+    loadLikes();
 
     const ch = supabase
       .channel(`comments_${chapterId}`)
@@ -204,7 +238,10 @@ export default function CommentsSection({
           table: "chapters_comments",
           filter: `chapter_id=eq.${chapterId}`,
         },
-        () => fetchPage(0)
+        () => {
+          fetchPage(0);
+          loadTotal();
+        }
       )
       .on(
         "postgres_changes",
@@ -226,11 +263,12 @@ export default function CommentsSection({
 
   /** CRUD text/sticker (root & reply) */
   async function createComment(payload) {
-    const { error } = await supabase
-      .from("chapters_comments")
-      .insert(payload);
+    const { error } = await supabase.from("chapters_comments").insert(payload);
     if (error) throw error;
   }
+
+  const authorName = () =>
+    userId ? displayName || "User" : displayName || "Guest";
 
   async function submitRoot() {
     if (!text.trim()) return;
@@ -245,7 +283,7 @@ export default function CommentsSection({
         chapter_id: chapterId,
         content: text.trim(),
         user_id: userId,
-        display_name: userId ? displayName || "User" : displayName || "Guest",
+        display_name: authorName(),
         parent_id: null,
         kind: "text",
       });
@@ -267,10 +305,11 @@ export default function CommentsSection({
         chapter_id: chapterId,
         content: replyText.trim(),
         user_id: userId,
-        display_name: userId ? displayName || "User" : displayName || "Guest",
+        display_name: authorName(),
         parent_id: parentId,
         kind: "text",
       });
+      setExpanded((e) => ({ ...e, [parentId]: true }));
       setReplyFor(null);
       setReplyText("");
       fetchPage(0);
@@ -294,6 +333,7 @@ export default function CommentsSection({
         sticker_url: url,
         content: "[sticker]" + url,
       });
+      if (parentId) setExpanded((e) => ({ ...e, [parentId]: true }));
       setPickerOpen(null);
       fetchPage(0);
     } catch (e) {
@@ -307,16 +347,12 @@ export default function CommentsSection({
   async function onDelete(comment) {
     const full = visibleText(comment) || "";
     const shortened =
-      full.length > 80 ? full.slice(0, 80).trimEnd() + "…" : full;
+      full.length > 80 ? full.slice(0, 80).trimEnd() + "鈥�" : full;
     const label = shortened ? `"${shortened}"` : "ini";
 
-    const ok = window.confirm(`Ingin menghapus komentar ${label}?`);
-    if (!ok) return;
+    if (!window.confirm(`Ingin menghapus komentar ${label}?`)) return;
 
-    await supabase
-      .from("chapters_comments")
-      .delete()
-      .eq("id", comment.id);
+    await supabase.from("chapters_comments").delete().eq("id", comment.id);
 
     setMenuFor(null);
     fetchPage(0);
@@ -364,7 +400,7 @@ export default function CommentsSection({
   /** Reactions */
   async function toggleReaction(kind) {
     if (!userId) {
-      await supabase.auth.signInWithOAuth({ provider: "google" });
+      await signIn();
       return;
     }
     setLoadingReact((s) => ({ ...s, [kind]: true }));
@@ -387,33 +423,114 @@ export default function CommentsSection({
     }
   }
 
+  /** Like komentar (optimistic) */
+  async function toggleLike(c) {
+    if (!userId) {
+      await signIn();
+      return;
+    }
+    const id = String(c.id);
+    const was = !!myLikes[id];
+    setMyLikes((m) => ({ ...m, [id]: !was }));
+    setLikeCounts((n) => ({
+      ...n,
+      [id]: Math.max(0, (n[id] || 0) + (was ? -1 : 1)),
+    }));
+
+    const { error } = was
+      ? await supabase
+          .from("comment_likes")
+          .delete()
+          .eq("comment_id", id)
+          .eq("user_id", userId)
+      : await supabase.from("comment_likes").insert({
+          comment_id: id,
+          chapter_id: String(chapterId),
+          user_id: userId,
+        });
+    if (error) loadLikes();
+  }
+
+  /** Mulai balas (reply ke reply = tetap di bawah komentar utama + @mention) */
+  function startReply(rootId, prefill = "") {
+    setReplyFor(rootId);
+    setReplyText(prefill);
+    setExpanded((e) => ({ ...e, [rootId]: true }));
+  }
+
+  /** Tombol spoiler di kotak input */
+  function toggleSpoiler() {
+    setText((t) => (SPOILER_RE.test(t) ? t.replace(SPOILER_RE, "") : "[SPOILER] " + t));
+  }
+
   /** Derivations */
-  const rootComments = useMemo(
-    () => comments.filter((c) => c.parent_id === null),
-    [comments]
-  );
   const repliesByParent = useMemo(() => {
     const map = {};
     comments.forEach((c) => {
       if (!c.parent_id) return;
       (map[c.parent_id] ||= []).push(c);
     });
+    Object.values(map).forEach((arr) =>
+      arr.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    );
     return map;
   }, [comments]);
 
+  const rootComments = useMemo(() => {
+    const arr = comments.filter((c) => c.parent_id === null);
+    arr.sort((a, b) => {
+      const pa = isPinned(a) ? 1 : 0;
+      const pb = isPinned(b) ? 1 : 0;
+      if (pa !== pb) return pb - pa;
+      if (order === "top") {
+        const d =
+          (likeCounts[String(b.id)] || 0) - (likeCounts[String(a.id)] || 0) ||
+          (repliesByParent[b.id]?.length || 0) -
+            (repliesByParent[a.id]?.length || 0);
+        if (d) return d;
+      }
+      return 0; // urutan dari server (created_at) dipertahankan
+    });
+    return arr;
+  }, [comments, order, likeCounts, repliesByParent]);
+
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+
+  /** Konteks untuk CommentItem */
+  const ctx = {
+    userId,
+    isAuthor,
+    menuFor,
+    setMenuFor,
+    editingId,
+    setEditingId,
+    editText,
+    setEditText,
+    onEditSave,
+    onDelete,
+    pinToggle,
+    likeCounts,
+    myLikes,
+    likesOn,
+    toggleLike,
+  };
+
   /** UI */
   return (
-    <section className="mt-8">
+    <section className="mx-auto mt-8 w-full max-w-3xl">
+      {/* RULES */}
+      <CommentRules />
+
       {/* REACTIONS */}
-      <div className="text-center">
-        <h3 className="text-xl font-extrabold tracking-wide sm:text-2xl md:text-3xl">
+      <div className="mt-8 text-center">
+        <h3 className="text-xl font-extrabold tracking-wide sm:text-2xl">
           Reaksi
         </h3>
-        <p className="mt-1 text-sm opacity-80 sm:text-base md:text-lg">
-          {counts.upvote + counts.suki + counts.apsih} total reaksi
+        <p className="mt-1 text-sm font-semibold sm:text-base">
+          {counts.upvote + counts.suki + counts.apsih} Reaksi
         </p>
 
-        <div className="mt-5 flex flex-wrap items-end justify-center gap-5 sm:gap-7 md:gap-10">
+        <div className="mt-5 flex flex-wrap items-end justify-center gap-6 sm:gap-10">
           {UI_REACTIONS.map(({ ui, img, db }) => (
             <ReactionButton
               key={ui}
@@ -429,60 +546,77 @@ export default function CommentsSection({
       </div>
 
       {/* INPUT ROOT */}
-      <div className="mt-6 rounded-2xl border border-white/10 bg-zinc-900/40 p-4 sm:p-5">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-xs opacity-70 sm:text-sm">
-            {userId ? (
-              <>
-                Masuk sebagai{" "}
-                <span className="font-semibold">{displayName || "User"}</span>
-              </>
-            ) : (
-              <>
-                Tulis komentar sebagai{" "}
-                <span className="font-semibold">Guest</span>
-              </>
-            )}
-          </div>
-          <div className="flex items-center gap-2 text-xs opacity-60">
-            {Math.max(
-              0,
-              text.trim().split(/\s+/).filter(Boolean).length
-            )}{" "}
-            kata · {remaining} chars
-          </div>
-        </div>
+      <div className="mt-8 rounded-xl border border-white/10 bg-zinc-900/40 transition focus-within:border-brand/60">
+        <textarea
+          className="block h-28 w-full resize-none bg-transparent px-3 pt-3 text-[15px] outline-none placeholder:text-zinc-500 sm:h-32"
+          placeholder="Komen di mari鈥�"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          maxLength={maxLength + 1000}
+          aria-label="Tulis komentar"
+        />
 
-        <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
-          <textarea
-            className="h-28 w-full resize-y rounded-lg border border-white/10 bg-zinc-950 px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-sky-600"
-            placeholder="Komen di mari…"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            maxLength={maxLength + 1000}
-          />
-          <div className="flex flex-row gap-2 md:flex-col">
+        <div className="flex items-center gap-1 px-2 pb-2">
+          <button
+            type="button"
+            onClick={() => setPickerOpen({})}
+            aria-label="Pilih stiker"
+            title="Stiker"
+            className="grid h-10 w-10 place-items-center rounded-lg text-zinc-300 hover:bg-white/10"
+          >
+            <SmilePlus className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={toggleSpoiler}
+            aria-pressed={spoilerOn}
+            aria-label="Tandai sebagai spoiler"
+            title="Spoiler"
+            className={clsx(
+              "grid h-10 w-10 place-items-center rounded-lg transition",
+              spoilerOn
+                ? "bg-amber-500/20 text-amber-300"
+                : "text-zinc-300 hover:bg-white/10"
+            )}
+          >
+            <EyeOff className="h-5 w-5" />
+          </button>
+
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-zinc-500">
+              {words} Kata
+              {remaining < 500 && (
+                <span className={clsx("ml-1", remaining < 0 && "text-red-400")}>
+                  路 {remaining}
+                </span>
+              )}
+            </span>
+
+            {!userId && (
+              <button
+                type="button"
+                onClick={signIn}
+                className="h-9 rounded-lg border border-white/15 px-3 text-sm font-medium hover:bg-white/10"
+              >
+                Login
+              </button>
+            )}
+
             <button
               type="button"
-              onClick={() => setPickerOpen({})}
-              className="inline-flex w-1/2 items-center justify-center gap-2 rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700 md:w-auto"
-            >
-              <SmilePlus className="h-4 w-4" /> Stiker
-            </button>
-            <button
               onClick={submitRoot}
               disabled={!text.trim() || sending || remaining < 0}
               className={clsx(
-                "inline-flex w-1/2 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm md:w-auto",
+                "inline-flex h-9 items-center gap-1.5 rounded-lg px-4 text-sm font-semibold text-white transition",
                 !text.trim() || remaining < 0
                   ? "bg-zinc-800 opacity-60"
-                  : "bg-sky-600 hover:bg-sky-500"
+                  : "bg-brand hover:brightness-110"
               )}
             >
               {sending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Mengirim…
+                  Mengirim
                 </>
               ) : (
                 <>
@@ -495,366 +629,191 @@ export default function CommentsSection({
         </div>
 
         {submitErr && (
-          <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+          <div className="mx-3 mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
             {submitErr}
           </div>
         )}
       </div>
 
-      {/* SORT + LIST */}
-      <div className="mt-6">
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-base font-semibold sm:text-lg">
-            {comments.length} Komentar
-          </div>
-          <div className="flex gap-2">
-            {[
-              { id: "new", label: "Terbaru" },
-              { id: "old", label: "Terlama" },
-              { id: "top", label: "Terpopuler" },
-            ].map((s) => (
-              <button
-                key={s.id}
-                onClick={() => setOrder(s.id)}
-                className={clsx(
-                  "rounded-full px-3 py-1 text-xs sm:text-sm",
-                  order === s.id ? "bg-zinc-800" : "bg-zinc-900"
-                )}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
+      {/* HEADER + SORT */}
+      <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-xl font-bold sm:text-2xl">
+          {total ?? comments.length} Komentar
+        </h3>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { id: "new", label: "Terbaru" },
+            { id: "old", label: "Terlama" },
+            { id: "top", label: "Terpopuler" },
+          ].map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setOrder(s.id)}
+              aria-pressed={order === s.id}
+              className={clsx(
+                "rounded-lg px-3 py-1.5 text-sm font-medium transition",
+                order === s.id
+                  ? "bg-brand text-white"
+                  : "bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+              )}
+            >
+              {s.label}
+            </button>
+          ))}
         </div>
-
-        {listLoading && page === 0 ? (
-          <div className="rounded-xl border border-white/10 bg-zinc-900/40 p-6 text-center text-sm opacity-70">
-            Memuat komentar…
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {rootComments.map((c) => (
-              <div
-                key={c.id}
-                className={clsx(
-                  "rounded-xl border border-white/10 bg-zinc-900/40 p-3 sm:p-4",
-                  isPinned(c) && "ring-2 ring-sky-500/60"
-                )}
-              >
-                {/* header root */}
-                <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-2 text-sm">
-                    <div
-                      className={clsx(
-                        "flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold uppercase text-white sm:h-8 sm:w-8 sm:text-sm",
-                        avatarGradient(c.display_name)
-                      )}
-                    >
-                      {initial(c.display_name)}
-                    </div>
-                    <div>
-                      <div className="font-semibold">
-                        {c.display_name || "Guest"}
-                      </div>
-                      <div className="flex items-center gap-1 text-[11px] opacity-60 sm:text-xs">
-                        <span>{new Date(c.created_at).toLocaleString()}</span>
-                        {c.edited_at && (
-                          <span className="italic text-[10px] sm:text-[11px]">
-                            (telah diedit)
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1">
-                    {isAuthor && c.parent_id === null && (
-                      <button
-                        onClick={() => pinToggle(c)}
-                        className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
-                        title={isPinned(c) ? "Lepas sematan" : "Sematkan"}
-                      >
-                        {isPinned(c) ? (
-                          <PinOff className="h-4 w-4" />
-                        ) : (
-                          <Pin className="h-4 w-4" />
-                        )}
-                      </button>
-                    )}
-
-                    {((userId && userId === c.user_id) || isAuthor) && (
-                      <div className="relative">
-                        <button
-                          onClick={() =>
-                            setMenuFor((prev) =>
-                              prev === c.id ? null : c.id
-                            )
-                          }
-                          className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
-                          title="Menu"
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </button>
-
-                        {menuFor === c.id && (
-                          <div
- className="absolute mt-1 w-32 rounded-md border border-white/10 bg-zinc-900 shadow-lg
- left-0 sm:left-auto sm:right-0 z-10"
->
-
-                            <button
-                              onClick={() => {
-                                setEditingId(c.id);
-                                setEditText(visibleText(c));
-                                setMenuFor(null);
-                              }}
-                              className="block w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => onDelete(c)}
-                              className="block w-full px-3 py-1.5 text-left text-xs text-red-200 hover:bg-red-800/40"
-                            >
-                              Hapus
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <button
-                      onClick={() => setReplyFor(c.id)}
-                      className="rounded-md bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
-                      title="Balas"
-                    >
-                      <Reply className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* body root */}
-                {editingId === c.id ? (
-                  <div className="space-y-2">
-                    <textarea
-                      className="h-24 w-full rounded-lg border border-white/10 bg-zinc-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-600"
-                      value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => onEditSave(c.id)}
-                        className="rounded-lg bg-sky-600 px-3 py-1 text-sm hover:bg-sky-500"
-                      >
-                        Simpan
-                      </button>
-                      <button
-                        onClick={() => setEditingId(null)}
-                        className="rounded-lg bg-zinc-800 px-3 py-1 text-sm"
-                      >
-                        Batal
-                      </button>
-                    </div>
-                  </div>
-                ) : isSticker(c) ? (
-                  <img
-                    src={stickerUrl(c)}
-                    alt="stiker"
-                    className="max-h-40 select-none sm:max-h-48"
-                    draggable={false}
-                  />
-) : (
-  <SpoilerText text={visibleText(c)} />
-)
-}
-
-                {/* replies */}
-                <div className="mt-3 space-y-2">
-                  {(repliesByParent[c.id] || []).map((r) => (
-                    <div
-                      key={r.id}
-                      className="ml-3 rounded-lg border border-white/10 bg-white/5 p-3 sm:ml-6 md:ml-10"
-                    >
-                      <div className="mb-1 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex items-center gap-2 text-xs">
-                          <div
-                            className={clsx(
-                              "grid h-6 w-6 place-items-center rounded-full text-[11px] text-white sm:h-7 sm:w-7 sm:text-xs",
-                              avatarGradient(r.display_name)
-                            )}
-                          >
-                            {initial(r.display_name)}
-                          </div>
-                          <div>
-                            <div className="font-semibold">
-                              {r.display_name || "Guest"}
-                            </div>
-                            <div className="flex items-center gap-1 opacity-60">
-                              <span>
-                                {new Date(
-                                  r.created_at
-                                ).toLocaleString()}
-                              </span>
-                              {r.edited_at && (
-                                <span className="italic text-[10px] sm:text-[11px]">
-                                  (telah diedit)
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {((userId && userId === r.user_id) || isAuthor) && (
-                          <div className="mt-1 flex gap-1 sm:mt-0">
-                            <div className="relative">
-                              <button
-                                onClick={() =>
-                                  setMenuFor((prev) =>
-                                    prev === r.id ? null : r.id
-                                  )
-                                }
-                                className="rounded-md bg-white/10 px-2 py-0.5 text-xs hover:bg-white/20"
-                              >
-                                <MoreHorizontal className="h-4 w-4" />
-                              </button>
-
-                              {menuFor === r.id && (
-                                <div
- className="absolute mt-1 w-32 rounded-md border border-white/10 bg-zinc-900 shadow-lg
- left-0 sm:left-auto sm:right-0 z-10"
->
-                                  <button
-                                    onClick={() => {
-                                      setEditingId(r.id);
-                                      setEditText(visibleText(r));
-                                      setMenuFor(null);
-                                    }}
-                                    className="block w-full px-3 py-1.5 text-left text-xs hover:bg-zinc-800"
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    onClick={() => onDelete(r)}
-                                    className="block w-full px-3 py-1.5 text-left text-xs text-red-200 hover:bg-red-800/40"
-                                  >
-                                    Hapus
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {editingId === r.id ? (
-                        <div className="space-y-2">
-                          <textarea
-                            className="h-20 w-full rounded-lg border border-white/10 bg-zinc-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-600"
-                            value={editText}
-                            onChange={(e) => setEditText(e.target.value)}
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => onEditSave(r.id)}
-                              className="rounded-lg bg-sky-600 px-3 py-1 text-sm hover:bg-sky-500"
-                            >
-                              Simpan
-                            </button>
-                            <button
-                              onClick={() => setEditingId(null)}
-                              className="rounded-lg bg-zinc-800 px-3 py-1 text-sm"
-                            >
-                              Batal
-                            </button>
-                          </div>
-                        </div>
-                      ) : isSticker(r) ? (
-                        <img
-                          src={stickerUrl(r)}
-                          alt="stiker"
-                          className="max-h-32 select-none sm:max-h-40"
-                          draggable={false}
-                        />
-) : (
-  <SpoilerText text={visibleText(r)} />
-)
-}
-                    </div>
-                  ))}
-                </div>
-
-                {/* reply editor */}
-                {replyFor === c.id && (
-                  <div className="ml-3 mt-3 space-y-2 sm:ml-6 md:ml-10">
-                    <textarea
-                      className="h-20 w-full rounded-lg border border-white/10 bg-zinc-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-600"
-                      placeholder="Tulis balasan…"
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => submitReply(c.id)}
-                        className="rounded-lg bg-sky-600 px-3 py-1 text-sm hover:bg-sky-500"
-                      >
-                        Balas
-                      </button>
-                      <button
-                        onClick={() => setPickerOpen({ parentId: c.id })}
-                        className="rounded-lg bg-zinc-800 px-3 py-1 text-sm"
-                      >
-                        <SmilePlus className="mr-1 inline h-4 w-4" />
-                        Stiker
-                      </button>
-                      <button
-                        onClick={() => {
-                          setReplyFor(null);
-                          setReplyText("");
-                        }}
-                        className="rounded-lg bg-zinc-800 px-3 py-1 text-sm"
-                      >
-                        Batal
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {/* Load more */}
-            {hasMore && (
-              <div className="pt-2">
-                <button
-                  onClick={() => {
-                    const np = page + 1;
-                    setPage(np);
-                    fetchPage(np);
-                  }}
-                  className="mx-auto block rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/20"
-                >
-                  Tampilkan lebih banyak
-                </button>
-              </div>
-            )}
-
-            {!listLoading && rootComments.length === 0 && (
-              <div className="rounded-xl border border-white/10 bg-zinc-900/40 p-6 text-center text-sm opacity-70">
-                Belum ada komentar. Jadilah yang pertama!
-              </div>
-            )}
-          </div>
-        )}
       </div>
+
+      {/* LIST */}
+      {listLoading && page === 0 && comments.length === 0 ? (
+        <div className="mt-4 space-y-5 animate-pulse" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex gap-3">
+              <div className="h-10 w-10 shrink-0 rounded-full bg-zinc-800" />
+              <div className="flex-1 space-y-2 pt-1">
+                <div className="h-3 w-1/3 rounded bg-zinc-800" />
+                <div className="h-3 w-5/6 rounded bg-zinc-800/70" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <ul className="mt-2 divide-y divide-white/5">
+          {rootComments.map((c) => {
+            const replies = repliesByParent[c.id] || [];
+            const open = !!expanded[c.id];
+
+            return (
+              <li key={c.id} className="py-4">
+                <CommentItem
+                  c={c}
+                  ctx={ctx}
+                  onReply={() => startReply(c.id, "")}
+                >
+                  {replies.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpanded((e) => ({ ...e, [c.id]: !e[c.id] }))
+                      }
+                      aria-expanded={open}
+                      className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-brand hover:brightness-125"
+                    >
+                      <ChevronDown
+                        className={clsx(
+                          "h-4 w-4 transition-transform",
+                          open && "rotate-180"
+                        )}
+                      />
+                      {open ? "Sembunyikan balasan" : `${replies.length} balasan`}
+                    </button>
+                  )}
+
+                  {open && replies.length > 0 && (
+                    <ul className="mt-3 space-y-4 border-l border-white/10 pl-3 sm:pl-4">
+                      {replies.map((r) => (
+                        <li key={r.id}>
+                          <CommentItem
+                            c={r}
+                            isReply
+                            ctx={ctx}
+                            onReply={() =>
+                              startReply(c.id, `@${r.display_name || "Guest"} `)
+                            }
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {replyFor === c.id && (
+                    <div className="mt-3 space-y-2">
+                      <textarea
+                        autoFocus
+                        className="h-20 w-full resize-none rounded-lg border border-white/10 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-brand/60"
+                        placeholder="Tulis balasan鈥�"
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => submitReply(c.id)}
+                          disabled={!replyText.trim() || sending}
+                          className="rounded-lg bg-brand px-4 py-1.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+                        >
+                          Balas
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPickerOpen({ parentId: c.id })}
+                          className="inline-flex items-center gap-1 rounded-lg bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700"
+                        >
+                          <SmilePlus className="h-4 w-4" />
+                          Stiker
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReplyFor(null);
+                            setReplyText("");
+                          }}
+                          className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700"
+                        >
+                          Batal
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </CommentItem>
+              </li>
+            );
+          })}
+
+          {!listLoading && rootComments.length === 0 && (
+            <li className="py-10 text-center text-sm text-zinc-400">
+              Belum ada komentar. Jadilah yang pertama!
+            </li>
+          )}
+        </ul>
+      )}
+
+      {/* Load more */}
+      {hasMore && (
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={() => {
+              const np = page + 1;
+              setPage(np);
+              fetchPage(np);
+            }}
+            className="mx-auto block rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/20"
+          >
+            Tampilkan lebih banyak
+          </button>
+        </div>
+      )}
 
       {/* STICKER MODAL */}
       {pickerOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
-          <div className="w-[min(680px,92vw)] rounded-2xl border border-white/10 bg-zinc-900 p-4">
-            <div className="mb-3 flex items-center justify_between">
-              <div className="text-sm font-semibold">Pilih Stiker</div>
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 sm:items-center sm:p-4"
+          onClick={() => setPickerOpen(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Pilih stiker"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full rounded-t-2xl border border-white/10 bg-zinc-900 p-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))] sm:max-w-[680px] sm:rounded-2xl"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-base font-semibold">Pilih Stiker</div>
               <button
+                type="button"
                 onClick={() => setPickerOpen(null)}
-                className="rounded-lg bg-zinc-800 px-2 py-1 hover:bg-zinc-700"
+                className="grid h-9 w-9 place-items-center rounded-lg bg-zinc-800 hover:bg-zinc-700"
                 aria-label="Tutup"
               >
                 <X className="h-4 w-4" />
@@ -863,11 +822,12 @@ export default function CommentsSection({
             <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
               {STICKERS.map((s) => (
                 <button
+                  type="button"
                   key={s.id}
                   onClick={() =>
                     sendSticker(s.url, pickerOpen?.parentId ?? undefined)
                   }
-                  className="group rounded-xl border border_white/10 bg-zinc-800/50 p-2 hover:bg-zinc-800"
+                  className="group rounded-xl border border-white/10 bg-zinc-800/50 p-2 hover:bg-zinc-800"
                 >
                   <img
                     src={s.url}
@@ -885,86 +845,379 @@ export default function CommentsSection({
   );
 }
 
+/** ==== Satu komentar (dipakai untuk komentar utama & balasan) ==== */
+function CommentItem({ c, isReply = false, ctx, onReply, children }) {
+  const id = String(c.id);
+  const mine = !!ctx.userId && ctx.userId === c.user_id;
+  const canManage = mine || ctx.isAuthor;
+  const likeN = ctx.likeCounts[id] || 0;
+  const liked = !!ctx.myLikes[id];
+  const editing = ctx.editingId === c.id;
+
+  return (
+    <article className="flex gap-3">
+      <Avatar name={c.display_name} small={isReply} />
+
+      <div className="min-w-0 flex-1">
+        {/* header */}
+        <div className="flex items-start gap-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="truncate font-semibold text-brand">
+              {c.display_name || "Guest"}
+            </span>
+            {isPinned(c) && (
+              <span className="rounded bg-brand/20 px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+                馃搶 Disematkan
+              </span>
+            )}
+            <time
+              className="text-xs text-zinc-500"
+              title={new Date(c.created_at).toLocaleString()}
+            >
+              {fmtDate(c.created_at)}
+            </time>
+            {c.edited_at && (
+              <span className="text-[11px] italic text-zinc-500">(diedit)</span>
+            )}
+          </div>
+
+          {canManage && (
+            <div className="relative -mt-1 shrink-0" data-comment-menu>
+              <button
+                type="button"
+                onClick={() =>
+                  ctx.setMenuFor((prev) => (prev === c.id ? null : c.id))
+                }
+                aria-label="Menu komentar"
+                aria-haspopup="menu"
+                aria-expanded={ctx.menuFor === c.id}
+                className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-white/10 hover:text-white"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+
+              {ctx.menuFor === c.id && (
+                <div
+                  role="menu"
+                  className="absolute right-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-white/10 bg-zinc-900 shadow-lg"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      ctx.setEditingId(c.id);
+                      ctx.setEditText(visibleText(c));
+                      ctx.setMenuFor(null);
+                    }}
+                    className="block w-full px-3 py-2 text-left text-sm hover:bg-zinc-800"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => ctx.onDelete(c)}
+                    className="block w-full px-3 py-2 text-left text-sm text-red-300 hover:bg-red-900/40"
+                  >
+                    Hapus
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* isi */}
+        <div className="mt-1">
+          {editing ? (
+            <div className="space-y-2">
+              <textarea
+                autoFocus
+                className="h-24 w-full resize-none rounded-lg border border-white/10 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-brand/60"
+                value={ctx.editText}
+                onChange={(e) => ctx.setEditText(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => ctx.onEditSave(c.id)}
+                  className="rounded-lg bg-brand px-4 py-1.5 text-sm font-semibold text-white hover:brightness-110"
+                >
+                  Simpan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => ctx.setEditingId(null)}
+                  className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700"
+                >
+                  Batal
+                </button>
+              </div>
+            </div>
+          ) : isSticker(c) ? (
+            <img
+              src={stickerUrl(c)}
+              alt="stiker"
+              className={clsx(
+                "select-none",
+                isReply ? "max-h-28 sm:max-h-32" : "max-h-36 sm:max-h-44"
+              )}
+              draggable={false}
+            />
+          ) : (
+            <SpoilerText text={visibleText(c)} />
+          )}
+        </div>
+
+        {/* aksi */}
+        {!editing && (
+          <div className="mt-2 flex items-center gap-5 text-sm text-zinc-400">
+            {ctx.likesOn && (
+              <button
+                type="button"
+                onClick={() => ctx.toggleLike(c)}
+                aria-pressed={liked}
+                aria-label="Suka"
+                className={clsx(
+                  "inline-flex items-center gap-1.5 transition hover:text-white",
+                  liked && "text-brand hover:text-brand"
+                )}
+              >
+                <ThumbsUp className={clsx("h-5 w-5", liked && "fill-current")} />
+                {likeN > 0 && <span className="tabular-nums">{likeN}</span>}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={onReply}
+              className="font-medium hover:text-white"
+            >
+              Balas
+            </button>
+
+            {ctx.isAuthor && !isReply && (
+              <button
+                type="button"
+                onClick={() => ctx.pinToggle(c)}
+                aria-label={isPinned(c) ? "Lepas sematan" : "Sematkan"}
+                title={isPinned(c) ? "Lepas sematan" : "Sematkan"}
+                className="hover:text-white"
+              >
+                {isPinned(c) ? (
+                  <PinOff className="h-4 w-4" />
+                ) : (
+                  <Pin className="h-4 w-4" />
+                )}
+              </button>
+            )}
+          </div>
+        )}
+
+        {children}
+      </div>
+    </article>
+  );
+}
+
+/** ==== Avatar ==== */
+function Avatar({ name, small = false }) {
+  return (
+    <div
+      className={clsx(
+        "grid shrink-0 place-items-center rounded-full font-bold uppercase text-white",
+        small ? "h-8 w-8 text-xs" : "h-10 w-10 text-sm",
+        avatarGradient(name)
+      )}
+    >
+      {initial(name)}
+    </div>
+  );
+}
+
+/** ==== Rules komentar (bisa dilipat, ingat pilihan di perangkat) ==== */
+function CommentRules() {
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(RULES_KEY) !== "1";
+    } catch {
+      return true;
+    }
+  });
+
+  const toggle = () =>
+    setOpen((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(RULES_KEY, next ? "0" : "1");
+      } catch {}
+      return next;
+    });
+
+  const items = [
+    {
+      icon: "馃毇",
+      head: "Dilarang Toxic, Rasis, atau menimbulkan kerusuhan!",
+      body: (
+        <>
+          Yang ikut kerusuhan bakal{" "}
+          <b className="text-rose-400">kena ban juga!</b> Jadi diemin aja,
+          cukup <b className="text-rose-400">laporin ke admin!</b>
+        </>
+      ),
+    },
+    { icon: "馃檲", head: "Dilarang pakai photo profil cabul!" },
+    { icon: "馃敒", head: "Dilarang mengirim photo atau gif cabul/tidak senonoh!" },
+    { icon: "馃彌锔�", head: "DILARANG KOMENTAR SOAL POLITIK!!" },
+    {
+      icon: "馃摎",
+      head: "Yang belum tau cara spoiler, tolong lihat tutorial dulu yaa saudaraku!",
+    },
+    {
+      icon: "馃か",
+      head: "DILARANG SPOILER ENDING!!",
+      body: "Cukup 1鈥�2 chapter ke depan aja!",
+    },
+    {
+      icon: "馃挰",
+      head: "DILARANG SPAM KOMENTAR BUAT LEVELING!",
+      body: (
+        <>
+          Yang cuma spam emot atau komen hal yang sama tiap chapter juga{" "}
+          <b className="text-rose-400">kena ban!</b> Intinya,{" "}
+          <b className="text-rose-400">leveling nggak wajar = auto ban!</b>{" "}
+          Tolong yaa, yang normal aja 馃檹
+        </>
+      ),
+    },
+  ];
+
+  return (
+    <div className="rounded-lg border border-white/15 bg-zinc-900/50">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+      >
+        <span aria-hidden="true">鈿狅笍</span>
+        <span className="flex-1 text-base font-bold sm:text-lg">
+          Rules Komentar Web Shinigami ID
+        </span>
+        <ChevronDown
+          className={clsx(
+            "h-5 w-5 shrink-0 text-zinc-400 transition-transform",
+            open && "rotate-180"
+          )}
+        />
+      </button>
+
+      {open && (
+        <div className="space-y-4 px-4 pb-4 text-sm leading-relaxed">
+          <ul className="space-y-3">
+            {items.map((it) => (
+              <li key={it.head} className="flex gap-2.5">
+                <span aria-hidden="true" className="shrink-0">
+                  {it.icon}
+                </span>
+                <div>
+                  <p className="font-bold text-rose-400">{it.head}</p>
+                  {it.body && <p className="mt-0.5 text-zinc-200">{it.body}</p>}
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <div className="border-t border-white/10 pt-4">
+            <p className="flex gap-2.5">
+              <span aria-hidden="true">馃摙</span>
+              <b className="text-rose-400">Noted:</b>
+            </p>
+            <p className="mt-1 text-zinc-200">
+              Yang melanggar rules di atas akan langsung{" "}
+              <b className="text-rose-400">kena BAN! Tanpa peringatan!</b>
+            </p>
+            <p className="mt-3 flex gap-2.5 text-zinc-200">
+              <span aria-hidden="true">馃敀</span>
+              <span>
+                Akun komentarmu akan{" "}
+                <b className="text-rose-400">dibanned permanen</b> dan{" "}
+                <b className="text-rose-400">tidak bisa balik lagi!!!</b>
+              </span>
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** ==== Tombol Reaksi ==== */
 function ReactionButton({ label, imgSrc, active, count, busy, onClick }) {
   return (
     <button
+      type="button"
       onClick={onClick}
+      aria-pressed={active}
       className="group relative flex flex-col items-center"
     >
       <span
         className={clsx(
-          "absolute -right-2.5 -top-2 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-sky-700 sm:-right-3 sm:text-xs",
-          active ? "bg-sky-600" : "bg-zinc-800"
+          "absolute -right-3 -top-2 z-10 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ring-2 ring-brand",
+          active ? "bg-brand text-white" : "bg-zinc-950 text-zinc-100"
         )}
       >
-        {busy ? "…" : count ?? 0}
+        {busy ? "鈥�" : count ?? 0}
       </span>
 
       <div
         className={clsx(
-          "overflow-hidden rounded-full ring-1 ring-white/10",
-          "h-14 w-14 sm:h-16 sm:w-16 md:h-20 md:w-20",
-          active ? "bg-sky-600/20" : "bg-zinc-800/50"
+          "h-16 w-16 overflow-hidden rounded-full ring-1 transition group-hover:scale-105 sm:h-20 sm:w-20",
+          active ? "bg-brand/20 ring-brand" : "bg-zinc-800/50 ring-white/10"
         )}
       >
         <img
           src={imgSrc}
-          alt={label}
+          alt=""
           className="h-full w-full object-cover"
           draggable={false}
         />
       </div>
 
-      <div className="mt-2 text-xs font-semibold sm:text-sm md:text-base">
-        {label}
-      </div>
+      <div className="mt-2 text-sm font-semibold sm:text-base">{label}</div>
     </button>
   );
 }
+
+/** ==== Teks komentar + spoiler (tombol "Spoiler 鈱�") ==== */
 function SpoilerText({ text }) {
   const [open, setOpen] = useState(false);
+  const isSpoiler = SPOILER_RE.test(text || "");
 
-  // cek apakah teks ini spoiler (diawali tag [SPOILER])
-  const spoilerRegex = /^\s*\[spoiler[^\]]*\]\s*/i;
-  const isSpoiler = spoilerRegex.test(text || "");
+  const body = (t) => (
+    <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">
+      {t}
+    </div>
+  );
 
-  if (!isSpoiler) {
-    // bukan spoiler → render biasa
-    return (
-      <div className="whitespace-pre-wrap text-sm leading-7 sm:text-base">
-        {text}
-      </div>
-    );
-  }
+  if (!isSpoiler) return body(text);
 
-  // buang tag [SPOILER] dari teks yang ditampilkan
-  const cleaned = (text || "").replace(spoilerRegex, "");
+  const cleaned = (text || "").replace(SPOILER_RE, "");
 
   return (
-    <button
-      type="button"
-      onClick={() => setOpen((v) => !v)}
-      className="relative w-full text-left group"
-    >
-      {/* isi komentar */}
-      <div
-        className={clsx(
-          "whitespace-pre-wrap text-sm leading-7 sm:text-base transition duration-200",
-          !open && "blur-sm select-none group-hover:blur-[2px]"
-        )}
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-sm font-semibold hover:bg-zinc-700"
       >
-        {cleaned}
-      </div>
-
-      {/* overlay badge SPOILER */}
-      {!open && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <span className="rounded-full border border-amber-400/60 bg-black/75 px-3 py-1 text-xs sm:text-sm font-semibold italic text-amber-100 shadow-lg">
-            SPOILER · klik untuk lihat
-          </span>
-        </div>
-      )}
-    </button>
+        Spoiler
+        <ChevronDown
+          className={clsx("h-4 w-4 transition-transform", open && "rotate-180")}
+        />
+      </button>
+      {open && <div className="mt-2">{body(cleaned)}</div>}
+    </div>
   );
-    }
+     }
