@@ -146,6 +146,28 @@ async function deleteChapter(seriesSlug, chapterId, bucket) {
   );
 }
 
+async function uploadImageToR2(file, meta) {
+  if (!file.type.startsWith("image/")) throw new Error(`${file.name} bukan gambar.`);
+  if (file.size > 15 * 1024 * 1024) throw new Error(`${file.name} lebih dari 15 MB.`);
+
+  // 1. Minta izin upload ke API (lewat Vercel)
+  const info = await httpJson("/admin/upload-url", {
+    method: "POST",
+    body: { ...meta, contentType: file.type },
+  });
+
+  // 2. Kirim file langsung ke R2 (tidak lewat Vercel)
+  const put = await fetch(info.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type },
+    body: file,
+  });
+  if (!put.ok) throw new Error(`Upload gagal (${put.status}): ${file.name}`);
+
+  // 3. Kembalikan URL publik gambar
+  return info.publicUrl;
+}
+
 /* ============================ Design tokens ============================ */
 const baseInput =
   "w-full rounded-lg bg-zinc-900/70 px-3 text-sm text-zinc-100 ring-1 ring-white/10 placeholder:text-zinc-500 focus:outline-none focus:ring-2";
@@ -473,10 +495,29 @@ const PreviewBox = ({ label, src, ratio }) => (
   </div>
 );
 
+const UploadButton = ({ onChange, multiple = false, disabled, children }) => (
+  <label
+    className={`${btnGhost} shrink-0 cursor-pointer ${
+      disabled ? "pointer-events-none opacity-50" : ""
+    }`}
+  >
+    {children}
+    <input
+      type="file"
+      accept="image/*"
+      multiple={multiple}
+      hidden
+      disabled={disabled}
+      onChange={onChange}
+    />
+  </label>
+);
+
 /* ============================ Main ============================ */
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("overview"); // overview | series | chapter | trash
   const [busy, setBusy] = useState(false);
+  const [uploadingLabel, setUploadingLabel] = useState(""); // kosong = tidak sedang upload
   const chapterSubmitLock = useRef(false);
   const [bucket, setBucket] = useState("data1");
   const [showLocationConfirm, setShowLocationConfirm] = useState(false);
@@ -925,6 +966,74 @@ export default function AdminDashboard() {
     }
   }
 
+async function onPickSeriesImage(e, kind) {
+  const file = e.target.files?.[0];
+  e.target.value = ""; // supaya file yang sama bisa dipilih lagi
+  if (!file) return;
+
+  const s = slug.trim() || slugify(title);
+  if (!s) return toast.error("Isi judul atau slug dulu.");
+
+  try {
+    setUploadingLabel(`Mengunggah ${kind}...`);
+    const url = await uploadImageToR2(file, { kind, slug: s });
+    if (kind === "cover") setCover(url);
+    else setBackdrop(url);
+    toast.success(`${kind === "cover" ? "Cover" : "Backdrop"} terunggah.`);
+  } catch (err) {
+    toast.error(err.message || "Upload gagal");
+  } finally {
+    setUploadingLabel("");
+  }
+}
+
+async function onPickChapterImages(e) {
+  const files = [...(e.target.files || [])].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true })
+  );
+  e.target.value = "";
+  if (!files.length) return;
+
+  const targetSlug = seriesSlugForChapter.trim();
+  if (!targetSlug) return toast.error("Pilih series tujuan dulu.");
+
+  const number = Number(chNo) || 1;
+  const urls = new Array(files.length).fill(null);
+  const errors = [];
+  let done = 0;
+
+  try {
+    // 4 file sekaligus supaya cepat tapi tidak membebani
+    for (let i = 0; i < files.length; i += 4) {
+      await Promise.all(
+        files.slice(i, i + 4).map(async (file, k) => {
+          try {
+            urls[i + k] = await uploadImageToR2(file, {
+              kind: "chapter",
+              slug: targetSlug,
+              chapter: number,
+              index: i + k + 1,
+            });
+          } catch (err) {
+            errors.push(err.message);
+          }
+          done += 1;
+          setUploadingLabel(`Mengunggah ${done}/${files.length}...`);
+        })
+      );
+    }
+
+    const ok = urls.filter(Boolean);
+    if (ok.length) {
+      setChImagesRaw((prev) => [prev.trim(), ...ok].filter(Boolean).join("\n"));
+    }
+    if (errors.length) toast.error(`${errors.length} file gagal: ${errors[0]}`);
+    else toast.success(`${ok.length} gambar terunggah.`);
+  } finally {
+    setUploadingLabel("");
+  }
+}
+
   const tabs = [
     { id: "overview", label: "Dashboard" },
     { id: "series", label: "Series" },
@@ -1259,21 +1368,31 @@ export default function AdminDashboard() {
               <Section title="Aset Visual">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Cover URL">
-                    <input
-                      value={cover}
-                      onChange={(e) => setCover(e.target.value.trim())}
-                      placeholder="https://..."
-                      className={inputCls}
-                    />
-                  </Field>
-                  <Field label="Backdrop URL (Opsional)">
-                    <input
-                      value={backdrop}
-                      onChange={(e) => setBackdrop(e.target.value.trim())}
-                      placeholder="https://..."
-                      className={inputCls}
-                    />
-                  </Field>
+  <div className="flex gap-2">
+    <input
+      value={cover}
+      onChange={(e) => setCover(e.target.value.trim())}
+      placeholder="https://..."
+      className={inputCls}
+    />
+    <UploadButton disabled={!!uploadingLabel} onChange={(e) => onPickSeriesImage(e, "cover")}>
+      Upload
+    </UploadButton>
+  </div>
+</Field>
+<Field label="Backdrop URL (Opsional)">
+  <div className="flex gap-2">
+    <input
+      value={backdrop}
+      onChange={(e) => setBackdrop(e.target.value.trim())}
+      placeholder="https://..."
+      className={inputCls}
+    />
+    <UploadButton disabled={!!uploadingLabel} onChange={(e) => onPickSeriesImage(e, "backdrop")}>
+      Upload
+    </UploadButton>
+  </div>
+</Field>
                 </div>
 
                 <div className="mt-4 grid grid-cols-[120px_1fr] items-start gap-4 sm:grid-cols-[140px_minmax(0,320px)]">
@@ -1338,7 +1457,7 @@ export default function AdminDashboard() {
               <div className="sticky bottom-0 z-20 -mx-4 border-t border-white/10 bg-zinc-950/90 px-4 py-3 backdrop-blur xl:mx-0 xl:px-0">
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={busy || !!uploadingLabel}
                   onClick={openSeriesConfirm}
                   className={btnBrand}
                 >
@@ -1485,6 +1604,12 @@ export default function AdminDashboard() {
               {chapterMode === "comic" && (
                 <Section title="Halaman & URL Gambar">
                   <div className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-3">
+  <UploadButton multiple disabled={!!uploadingLabel} onChange={onPickChapterImages}>
+    Pilih banyak gambar
+  </UploadButton>
+  {uploadingLabel && <span className="text-xs text-zinc-400">{uploadingLabel}</span>}
+</div>
                     <Field
                       label="Daftar URL Gambar"
                       hint="Tempel URL gambar (satu per baris atau dipisah koma)"
@@ -1574,7 +1699,7 @@ export default function AdminDashboard() {
 
               <div className="sticky bottom-0 z-20 -mx-4 border-t border-white/10 bg-zinc-950/90 px-4 py-3 backdrop-blur xl:mx-0 xl:px-0">
                 <button
-                  disabled={busy || chaptersLoading}
+                  disabled={busy || chaptersLoading || !!uploadingLabel}
                   onClick={onSendChapter}
                   className={btnBrand}
                 >
