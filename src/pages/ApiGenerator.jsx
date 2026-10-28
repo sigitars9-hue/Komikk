@@ -112,6 +112,53 @@ async function getSeriesChapters(slug, { page = 1, pageSize = 5000 } = {}) {
   );
 }
 
+async function uploadPending() {
+  if (!pending.length) return;
+
+  const targetSlug = seriesSlugForChapter.trim();
+  if (!targetSlug) return toast.error("Pilih series tujuan dulu.");
+
+  const number = Number(chNo) || 1;
+  const queue = pending; // urutan final dari kamu
+  const offset = chImages.length; // lanjutkan penomoran jika sudah ada gambar
+  const urls = new Array(queue.length).fill(null);
+  const errors = [];
+  let done = 0;
+
+  try {
+    for (let i = 0; i < queue.length; i += 4) {
+      await Promise.all(
+        queue.slice(i, i + 4).map(async (item, k) => {
+          try {
+            urls[i + k] = await uploadImageToR2(item.file, {
+              kind: "chapter",
+              slug: targetSlug,
+              chapter: number,
+              index: offset + i + k + 1,
+            });
+          } catch (err) {
+            errors.push(err.message);
+          }
+          done += 1;
+          setUploadingLabel(`Mengunggah ${done}/${queue.length}...`);
+        })
+      );
+    }
+
+    // Jika ada yang gagal, jangan tambahkan sebagian: urutan bisa rusak.
+    if (errors.length) {
+      toast.error(`${errors.length} file gagal: ${errors[0]}. Coba upload lagi.`);
+      return;
+    }
+
+    setChImagesRaw((prev) => [prev.trim(), ...urls].filter(Boolean).join("\n"));
+    clearPending();
+    toast.success(`${urls.length} gambar terunggah sesuai urutan.`);
+  } finally {
+    setUploadingLabel("");
+  }
+}
+
 async function getChapterPagesById(id) {
   return httpJson(`/chapter/${encodeURIComponent(id)}`);
 }
@@ -563,6 +610,8 @@ export default function AdminDashboard() {
   const [chAutoCover, setChAutoCover] = useState(true);
   const [chapterMode, setChapterMode] = useState("comic");
   const [chText, setChText] = useState("");
+  const [pending, setPending] = useState([]); // [{ id, file, preview }]
+  const pendingRef = useRef([]);
 
   /* Delete state */
   const [deleteSlug, setDeleteSlug] = useState("");
@@ -706,6 +755,15 @@ export default function AdminDashboard() {
     refreshSeriesList();
   }, []);
 
+useEffect(() => {
+  pendingRef.current = pending;
+}, [pending]);
+
+// bebaskan memori object URL saat komponen ditutup
+useEffect(
+  () => () => pendingRef.current.forEach((p) => URL.revokeObjectURL(p.preview)),
+  []
+);
   const filteredSeries = useMemo(() => {
     const q = seriesQuery.trim().toLowerCase();
     let list = Array.isArray(remoteSeries) ? [...remoteSeries] : [];
@@ -987,51 +1045,43 @@ async function onPickSeriesImage(e, kind) {
   }
 }
 
-async function onPickChapterImages(e) {
+function onPickChapterImages(e) {
   const files = [...(e.target.files || [])].sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { numeric: true })
   );
   e.target.value = "";
   if (!files.length) return;
 
-  const targetSlug = seriesSlugForChapter.trim();
-  if (!targetSlug) return toast.error("Pilih series tujuan dulu.");
+  setPending((prev) => [
+    ...prev,
+    ...files.map((file) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      file,
+      preview: URL.createObjectURL(file),
+    })),
+  ]);
+}
 
-  const number = Number(chNo) || 1;
-  const urls = new Array(files.length).fill(null);
-  const errors = [];
-  let done = 0;
+function movePending(i, dir) {
+  setPending((prev) => {
+    const j = i + dir;
+    if (j < 0 || j >= prev.length) return prev;
+    const next = [...prev];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
+}
 
-  try {
-    // 4 file sekaligus supaya cepat tapi tidak membebani
-    for (let i = 0; i < files.length; i += 4) {
-      await Promise.all(
-        files.slice(i, i + 4).map(async (file, k) => {
-          try {
-            urls[i + k] = await uploadImageToR2(file, {
-              kind: "chapter",
-              slug: targetSlug,
-              chapter: number,
-              index: i + k + 1,
-            });
-          } catch (err) {
-            errors.push(err.message);
-          }
-          done += 1;
-          setUploadingLabel(`Mengunggah ${done}/${files.length}...`);
-        })
-      );
-    }
+function removePending(i) {
+  setPending((prev) => {
+    URL.revokeObjectURL(prev[i]?.preview);
+    return prev.filter((_, idx) => idx !== i);
+  });
+}
 
-    const ok = urls.filter(Boolean);
-    if (ok.length) {
-      setChImagesRaw((prev) => [prev.trim(), ...ok].filter(Boolean).join("\n"));
-    }
-    if (errors.length) toast.error(`${errors.length} file gagal: ${errors[0]}`);
-    else toast.success(`${ok.length} gambar terunggah.`);
-  } finally {
-    setUploadingLabel("");
-  }
+function clearPending() {
+  pending.forEach((p) => URL.revokeObjectURL(p.preview));
+  setPending([]);
 }
 
   const tabs = [
@@ -1603,83 +1653,83 @@ async function onPickChapterImages(e) {
 
               {chapterMode === "comic" && (
                 <Section title="Halaman & URL Gambar">
-                  <div className="space-y-4">
-                  <div className="flex flex-wrap items-center gap-3">
-  <UploadButton multiple disabled={!!uploadingLabel} onChange={onPickChapterImages}>
-    Pilih banyak gambar
-  </UploadButton>
-  {uploadingLabel && <span className="text-xs text-zinc-400">{uploadingLabel}</span>}
+                 <div className="space-y-3">
+  <div className="flex flex-wrap items-center gap-3">
+    <UploadButton multiple disabled={!!uploadingLabel} onChange={onPickChapterImages}>
+      Pilih gambar
+    </UploadButton>
+    {pending.length > 0 && (
+      <button
+        type="button"
+        onClick={clearPending}
+        disabled={!!uploadingLabel}
+        className={btnGhost}
+      >
+        Kosongkan
+      </button>
+    )}
+    {uploadingLabel && <span className="text-xs text-zinc-400">{uploadingLabel}</span>}
+  </div>
+
+  {pending.length > 0 && (
+    <div className="space-y-3">
+      <p className="text-xs text-zinc-400">
+        Nomor di pojok = urutan halaman. Atur dulu, lalu upload. Bisa pilih gambar lagi untuk menambah.
+      </p>
+
+      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+        {pending.map((p, i) => (
+          <li key={p.id} className="space-y-1.5">
+            <div className="relative aspect-[3/4] overflow-hidden rounded-md bg-zinc-900 ring-1 ring-white/10">
+              <img src={p.preview} alt={`Halaman ${i + 1}`} className="h-full w-full object-cover" />
+              <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-bold">
+                {i + 1}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+              <button
+                type="button"
+                aria-label="Geser ke sebelum"
+                disabled={i === 0 || !!uploadingLabel}
+                onClick={() => movePending(i, -1)}
+                className="h-9 rounded-md bg-zinc-800/80 text-xs hover:bg-zinc-700 disabled:opacity-30"
+              >
+                ◀
+              </button>
+              <button
+                type="button"
+                aria-label="Geser ke sesudah"
+                disabled={i === pending.length - 1 || !!uploadingLabel}
+                onClick={() => movePending(i, 1)}
+                className="h-9 rounded-md bg-zinc-800/80 text-xs hover:bg-zinc-700 disabled:opacity-30"
+              >
+                ▶
+              </button>
+              <button
+                type="button"
+                aria-label="Hapus gambar"
+                disabled={!!uploadingLabel}
+                onClick={() => removePending(i)}
+                className="h-9 rounded-md bg-red-600/15 text-xs text-red-300 hover:bg-red-600/25 disabled:opacity-30"
+              >
+                ✕
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <button
+        type="button"
+        onClick={uploadPending}
+        disabled={!!uploadingLabel}
+        className={btnBrand}
+      >
+        {uploadingLabel || `Upload ${pending.length} gambar sesuai urutan`}
+      </button>
+    </div>
+  )}
 </div>
-                    <Field
-                      label="Daftar URL Gambar"
-                      hint="Tempel URL gambar (satu per baris atau dipisah koma)"
-                    >
-                      <textarea
-                        value={chImagesRaw}
-                        onChange={(e) => setChImagesRaw(e.target.value)}
-                        rows={7}
-                        placeholder={"https://i.ibb.co/.../001.jpg\nhttps://i.ibb.co/.../002.jpg"}
-                        className={`${areaCls} font-mono text-xs`}
-                      />
-                    </Field>
-
-                    <p className="text-xs text-zinc-400">
-                      Terdeteksi: <b className="text-zinc-100">{chImages.length}</b> gambar
-                    </p>
-
-                    <Field
-                      label="Cover Chapter"
-                      hint="Otomatis memakai gambar pertama, atau isi URL cover khusus."
-                    >
-                      <div className="flex flex-wrap gap-2">
-                        <Chip active={chAutoCover} onClick={() => setChAutoCover(true)}>
-                          Otomatis (gambar pertama)
-                        </Chip>
-                        <Chip active={!chAutoCover} onClick={() => setChAutoCover(false)}>
-                          Cover custom
-                        </Chip>
-                      </div>
-                    </Field>
-
-                    {!chAutoCover && (
-                      <input
-                        type="url"
-                        value={chCover}
-                        onChange={(e) => setChCover(e.target.value)}
-                        placeholder="https://example.com/cover-chapter.jpg"
-                        aria-label="URL cover chapter"
-                        className={inputCls}
-                      />
-                    )}
-
-                    {chapterCoverPreview && (
-                      <div className="w-32">
-                        <PreviewBox
-                          label="Preview Cover Chapter"
-                          src={chapterCoverPreview}
-                          ratio="aspect-[3/4]"
-                        />
-                      </div>
-                    )}
-
-                    {chImages.length > 0 && (
-                      <div className="grid max-h-56 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-6 lg:grid-cols-8">
-                        {chImages.map((src, i) => (
-                          <div
-                            key={i}
-                            className="aspect-[3/4] overflow-hidden rounded-md bg-zinc-900 ring-1 ring-white/10"
-                          >
-                            <img
-                              src={src}
-                              alt={`P.${i + 1}`}
-                              className="h-full w-full object-cover"
-                              loading="lazy"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
                 </Section>
               )}
 
@@ -1699,7 +1749,7 @@ async function onPickChapterImages(e) {
 
               <div className="sticky bottom-0 z-20 -mx-4 border-t border-white/10 bg-zinc-950/90 px-4 py-3 backdrop-blur xl:mx-0 xl:px-0">
                 <button
-                  disabled={busy || chaptersLoading || !!uploadingLabel}
+                  disabled={busy || chaptersLoading || !!uploadingLabel || pending.length > 0}
                   onClick={onSendChapter}
                   className={btnBrand}
                 >
