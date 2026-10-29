@@ -27,17 +27,19 @@ const parseImageList = (raw = "") => {
 
   const imagePattern =
     /https?:\/\/[^\s"'<>]+?\.(?:avif|webp|jpe?g|png|gif|bmp)(?:\?[^\s"'<>]*)?/gi;
+  const cleanUrl = (v) => v.replace(/&amp;/gi, "&").replace(/[),;]+$/, "").trim();
 
-  const matches = raw.match(imagePattern) || [];
-
-  const cleanUrl = (value) =>
-    value.replace(/&amp;/gi, "&").replace(/[),;]+$/, "").trim();
-
-  const urls = matches
-    .map(cleanUrl)
-    .filter((url) => /^https?:\/\//i.test(url));
-
-  return [...new Set(urls)];
+  const out = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    if (/^https?:\/\/\S+$/i.test(t)) {
+      out.push(cleanUrl(t)); // satu baris = satu URL
+    } else {
+      (t.match(imagePattern) || []).forEach((m) => out.push(cleanUrl(m)));
+    }
+  }
+  return [...new Set(out)];
 };
 
 const compact = (n) =>
@@ -112,52 +114,6 @@ async function getSeriesChapters(slug, { page = 1, pageSize = 5000 } = {}) {
   );
 }
 
-async function uploadPending() {
-  if (!pending.length) return;
-
-  const targetSlug = seriesSlugForChapter.trim();
-  if (!targetSlug) return toast.error("Pilih series tujuan dulu.");
-
-  const number = Number(chNo) || 1;
-  const queue = pending; // urutan final dari kamu
-  const offset = chImages.length; // lanjutkan penomoran jika sudah ada gambar
-  const urls = new Array(queue.length).fill(null);
-  const errors = [];
-  let done = 0;
-
-  try {
-    for (let i = 0; i < queue.length; i += 4) {
-      await Promise.all(
-        queue.slice(i, i + 4).map(async (item, k) => {
-          try {
-            urls[i + k] = await uploadImageToR2(item.file, {
-              kind: "chapter",
-              slug: targetSlug,
-              chapter: number,
-              index: offset + i + k + 1,
-            });
-          } catch (err) {
-            errors.push(err.message);
-          }
-          done += 1;
-          setUploadingLabel(`Mengunggah ${done}/${queue.length}...`);
-        })
-      );
-    }
-
-    // Jika ada yang gagal, jangan tambahkan sebagian: urutan bisa rusak.
-    if (errors.length) {
-      toast.error(`${errors.length} file gagal: ${errors[0]}. Coba upload lagi.`);
-      return;
-    }
-
-    setChImagesRaw((prev) => [prev.trim(), ...urls].filter(Boolean).join("\n"));
-    clearPending();
-    toast.success(`${urls.length} gambar terunggah sesuai urutan.`);
-  } finally {
-    setUploadingLabel("");
-  }
-}
 
 async function getChapterPagesById(id) {
   return httpJson(`/chapter/${encodeURIComponent(id)}`);
@@ -1084,6 +1040,82 @@ function clearPending() {
   setPending([]);
 }
 
+async function uploadPending() {
+  if (!pending.length || uploadingLabel) return;
+
+  const targetSlug = seriesSlugForChapter.trim();
+  if (!targetSlug) return toast.error("Pilih series tujuan dulu.");
+  if (!ADMIN_TOKEN) return toast.error("VITE_ADMIN_TOKEN belum diset.");
+
+  const number = Number(chNo) || 1;
+  const queue = [...pending]; // urutan final dari kamu
+  const offset = chImages.length;
+  const urls = new Array(queue.length).fill(null);
+  const errors = [];
+  let done = 0;
+
+  try {
+    setUploadingLabel(`Mengunggah 0/${queue.length}...`);
+    for (let i = 0; i < queue.length; i += 4) {
+      await Promise.all(
+        queue.slice(i, i + 4).map(async (item, k) => {
+          try {
+            urls[i + k] = await uploadImageToR2(item.file, {
+              kind: "chapter",
+              slug: targetSlug,
+              chapter: number,
+              index: offset + i + k + 1,
+            });
+          } catch (err) {
+            errors.push(err.message);
+          }
+          done += 1;
+          setUploadingLabel(`Mengunggah ${done}/${queue.length}...`);
+        })
+      );
+    }
+
+    // Jika ada yang gagal, jangan tambahkan sebagian: urutan bisa rusak.
+    if (errors.length) {
+      toast.error(`${errors.length} file gagal: ${errors[0]}. Coba upload lagi.`);
+      return;
+    }
+
+    setChImagesRaw((prev) => [prev.trim(), ...urls].filter(Boolean).join("\n"));
+    clearPending();
+    toast.success(`${urls.length} gambar terunggah sesuai urutan.`);
+  } finally {
+    setUploadingLabel("");
+  }
+}
+
+async function onPickChapterCover(e) {
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!file) return;
+
+  const targetSlug = seriesSlugForChapter.trim();
+  if (!targetSlug) return toast.error("Pilih series tujuan dulu.");
+  if (!ADMIN_TOKEN) return toast.error("VITE_ADMIN_TOKEN belum diset.");
+
+  try {
+    setUploadingLabel("Mengunggah cover chapter...");
+    const url = await uploadImageToR2(file, {
+      kind: "chapter",
+      slug: targetSlug,
+      chapter: Number(chNo) || 1,
+      index: 0, // 0 = cover, halaman mulai dari 1
+    });
+    setChCover(url);
+    setChAutoCover(false);
+    toast.success("Cover chapter terunggah.");
+  } catch (err) {
+    toast.error(err.message || "Upload cover gagal");
+  } finally {
+    setUploadingLabel("");
+  }
+}
+
   const tabs = [
     { id: "overview", label: "Dashboard" },
     { id: "series", label: "Series" },
@@ -1651,87 +1683,108 @@ function clearPending() {
                 </div>
               </Section>
 
-              {chapterMode === "comic" && (
-                <Section title="Halaman & URL Gambar">
-                 <div className="space-y-3">
-  <div className="flex flex-wrap items-center gap-3">
-    <UploadButton multiple disabled={!!uploadingLabel} onChange={onPickChapterImages}>
-      Pilih gambar
-    </UploadButton>
-    {pending.length > 0 && (
-      <button
-        type="button"
-        onClick={clearPending}
-        disabled={!!uploadingLabel}
-        className={btnGhost}
+{chapterMode === "comic" && (
+  <Section title="Halaman & URL Gambar" badge={`${chImages.length} gambar`}>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <UploadButton multiple disabled={!!uploadingLabel} onChange={onPickChapterImages}>
+          Pilih gambar
+        </UploadButton>
+        {pending.length > 0 && (
+          <button type="button" onClick={clearPending} disabled={!!uploadingLabel} className={btnGhost}>
+            Kosongkan
+          </button>
+        )}
+        {uploadingLabel && <span className="text-xs text-zinc-400">{uploadingLabel}</span>}
+      </div>
+
+      {pending.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-xs text-amber-300">
+            {pending.length} gambar belum diunggah. Atur urutan, lalu klik tombol upload di bawah.
+            Tombol "Upload Chapter" aktif setelah antrean ini selesai.
+          </p>
+
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+            {pending.map((p, i) => (
+              <li key={p.id} className="space-y-1.5">
+                <div className="relative aspect-[3/4] overflow-hidden rounded-md bg-zinc-900 ring-1 ring-white/10">
+                  <img src={p.preview} alt={`Halaman ${i + 1}`} className="h-full w-full object-cover" />
+                  <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-bold">
+                    {i + 1}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-1">
+                  <button type="button" aria-label="Geser ke sebelum"
+                    disabled={i === 0 || !!uploadingLabel} onClick={() => movePending(i, -1)}
+                    className="h-9 rounded-md bg-zinc-800/80 text-xs hover:bg-zinc-700 disabled:opacity-30">◀</button>
+                  <button type="button" aria-label="Geser ke sesudah"
+                    disabled={i === pending.length - 1 || !!uploadingLabel} onClick={() => movePending(i, 1)}
+                    className="h-9 rounded-md bg-zinc-800/80 text-xs hover:bg-zinc-700 disabled:opacity-30">▶</button>
+                  <button type="button" aria-label="Hapus gambar"
+                    disabled={!!uploadingLabel} onClick={() => removePending(i)}
+                    className="h-9 rounded-md bg-red-600/15 text-xs text-red-300 hover:bg-red-600/25 disabled:opacity-30">✕</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <button type="button" onClick={uploadPending} disabled={!!uploadingLabel} className={btnBrand}>
+            {uploadingLabel || `Upload ${pending.length} gambar sesuai urutan`}
+          </button>
+        </div>
+      )}
+
+      <Field
+        label="URL Gambar (satu per baris)"
+        hint="Hasil upload masuk otomatis ke sini. Bisa juga tempel URL manual atau ubah urutannya."
       >
-        Kosongkan
-      </button>
-    )}
-    {uploadingLabel && <span className="text-xs text-zinc-400">{uploadingLabel}</span>}
-  </div>
-
-  {pending.length > 0 && (
-    <div className="space-y-3">
-      <p className="text-xs text-zinc-400">
-        Nomor di pojok = urutan halaman. Atur dulu, lalu upload. Bisa pilih gambar lagi untuk menambah.
-      </p>
-
-      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-        {pending.map((p, i) => (
-          <li key={p.id} className="space-y-1.5">
-            <div className="relative aspect-[3/4] overflow-hidden rounded-md bg-zinc-900 ring-1 ring-white/10">
-              <img src={p.preview} alt={`Halaman ${i + 1}`} className="h-full w-full object-cover" />
-              <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-bold">
-                {i + 1}
-              </span>
-            </div>
-            <div className="grid grid-cols-3 gap-1">
-              <button
-                type="button"
-                aria-label="Geser ke sebelum"
-                disabled={i === 0 || !!uploadingLabel}
-                onClick={() => movePending(i, -1)}
-                className="h-9 rounded-md bg-zinc-800/80 text-xs hover:bg-zinc-700 disabled:opacity-30"
-              >
-                ◀
-              </button>
-              <button
-                type="button"
-                aria-label="Geser ke sesudah"
-                disabled={i === pending.length - 1 || !!uploadingLabel}
-                onClick={() => movePending(i, 1)}
-                className="h-9 rounded-md bg-zinc-800/80 text-xs hover:bg-zinc-700 disabled:opacity-30"
-              >
-                ▶
-              </button>
-              <button
-                type="button"
-                aria-label="Hapus gambar"
-                disabled={!!uploadingLabel}
-                onClick={() => removePending(i)}
-                className="h-9 rounded-md bg-red-600/15 text-xs text-red-300 hover:bg-red-600/25 disabled:opacity-30"
-              >
-                ✕
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      <button
-        type="button"
-        onClick={uploadPending}
-        disabled={!!uploadingLabel}
-        className={btnBrand}
-      >
-        {uploadingLabel || `Upload ${pending.length} gambar sesuai urutan`}
-      </button>
+        <textarea
+          value={chImagesRaw}
+          onChange={(e) => setChImagesRaw(e.target.value)}
+          rows={6}
+          placeholder={"https://.../001.jpg\nhttps://.../002.jpg"}
+          aria-label="URL gambar chapter"
+          className={`${areaCls} font-mono text-xs leading-relaxed`}
+        />
+      </Field>
     </div>
-  )}
-</div>
-                </Section>
-              )}
+  </Section>
+)}
+
+{/* ===== Cover Chapter (komik & novel) ===== */}
+<Section title="Cover Chapter" badge={chAutoCover ? "Otomatis" : "Kustom"}>
+  <div className="space-y-4">
+    <Segmented
+      value={chAutoCover ? "auto" : "custom"}
+      onChange={(v) => setChAutoCover(v === "auto")}
+      options={[
+        { value: "auto", label: "Otomatis (gambar pertama)" },
+        { value: "custom", label: "Pilih sendiri" },
+      ]}
+    />
+
+    {!chAutoCover && (
+      <Field label="Cover URL">
+        <div className="flex gap-2">
+          <input
+            value={chCover}
+            onChange={(e) => setChCover(e.target.value.trim())}
+            placeholder="https://..."
+            className={inputCls}
+          />
+          <UploadButton disabled={!!uploadingLabel} onChange={onPickChapterCover}>
+            Upload
+          </UploadButton>
+        </div>
+      </Field>
+    )}
+
+    <div className="grid grid-cols-[120px_1fr] items-start gap-4 sm:grid-cols-[140px_1fr]">
+      <PreviewBox label="Preview Cover Chapter" src={chapterCoverPreview} ratio="aspect-[3/4]" />
+    </div>
+  </div>
+</Section>
 
               {chapterMode === "novel" && (
                 <Section title="Teks Novel">
@@ -1748,6 +1801,11 @@ function clearPending() {
               )}
 
               <div className="sticky bottom-0 z-20 -mx-4 border-t border-white/10 bg-zinc-950/90 px-4 py-3 backdrop-blur xl:mx-0 xl:px-0">
+                {pending.length > 0 && (
+  <p className="mb-2 text-center text-xs text-amber-300">
+    Upload dulu {pending.length} gambar di antrean sebelum menyimpan chapter.
+  </p>
+)}
                 <button
                   disabled={busy || chaptersLoading || !!uploadingLabel || pending.length > 0}
                   onClick={onSendChapter}
